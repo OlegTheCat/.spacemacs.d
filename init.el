@@ -86,7 +86,12 @@ This function should only modify configuration layer settings."
                                       (vterm-anti-flicker-filter
                                        :location
                                        (recipe :fetcher github
-                                               :repo "martinbaillie/vterm-anti-flicker-filter")))
+                                               :repo "martinbaillie/vterm-anti-flicker-filter"))
+                                      (mcp-server
+                                       :location
+                                       (recipe :fetcher github
+                                               :repo "rhblind/emacs-mcp-server"
+                                               :files ("*.el" "tools/*.el" "mcp-wrapper.py" "mcp-wrapper.sh"))))
 
    ;; A list of packages that cannot be updated.
    dotspacemacs-frozen-packages '()
@@ -599,7 +604,8 @@ before packages are loaded."
     (dolist (f '("editor"
                  "vterm-toggle"
                  "agent-shell-config"
-                 "claude-code-tweaks"))
+                 "claude-code-tweaks"
+                 "mcp-server"))
       (load (expand-file-name f config-dir)))))
 
 
@@ -645,23 +651,23 @@ This function is called at the very end of Spacemacs initialization."
                 js2-refactor link-hint live-py-mode livid-mode load-env-vars
                 lorem-ipsum lsp-docker lsp-mode lsp-origami lsp-pyright
                 lsp-treemacs lsp-ui macrostep markdown-toc material-theme
-                monokai-theme multi-line multi-term multi-vterm multiple-cursors
-                mwim nameless nodejs-repl nord-theme nose npm-mode open-junk-file
-                org-superstar origami overseer package-lint page-break-lines
-                paradox password-generator pcre2el persistent-scratch pet
-                pip-requirements pipenv pippel poetry popwin pos-tip prettier-js
-                py-isort pydoc pyenv-mode pylookup python-pytest pythonic pyvenv
-                quickrun rainbow-delimiters reformatter restart-emacs restclient
-                ruff-format shell-maker shell-pop simple-httpd skewer-mode
-                smeargle solarized-theme space-doc spaceline
-                spacemacs-purpose-popwin spacemacs-whitespace-cleanup sphinx-doc
-                string-edit-at-point string-inflection symbol-overlay symon
-                term-cursor terminal-here tern toc-org toml-mode
-                treemacs-icons-dired treemacs-magit treemacs-persp
-                treemacs-projectile typescript-mode undo-fu-session unfill uuidgen
-                uv vi-tilde-fringe volatile-highlights vundo web-beautify web-mode
-                wgrep winum writeroom-mode ws-butler xcscope yaml-mode yapfify
-                yasnippet-snippets zenburn-theme))
+                mcp-server monokai-theme multi-line multi-term multi-vterm
+                multiple-cursors mwim nameless nodejs-repl nord-theme nose
+                npm-mode open-junk-file org-superstar origami overseer
+                package-lint page-break-lines paradox password-generator pcre2el
+                persistent-scratch pet pip-requirements pipenv pippel poetry
+                popwin pos-tip prettier-js py-isort pydoc pyenv-mode pylookup
+                python-pytest pythonic pyvenv quickrun rainbow-delimiters
+                reformatter restart-emacs restclient ruff-format shell-maker
+                shell-pop simple-httpd skewer-mode smeargle solarized-theme
+                space-doc spaceline spacemacs-purpose-popwin
+                spacemacs-whitespace-cleanup sphinx-doc string-edit-at-point
+                string-inflection symbol-overlay symon term-cursor terminal-here
+                tern tide toc-org toml-mode treemacs-icons-dired treemacs-magit
+                treemacs-persp treemacs-projectile typescript-mode undo-fu-session
+                unfill uuidgen uv vi-tilde-fringe volatile-highlights vundo
+                web-beautify web-mode wgrep winum writeroom-mode ws-butler xcscope
+                yaml-mode yapfify yasnippet-snippets zenburn-theme))
    '(safe-local-variable-values
      '((eval let
              ((grimoire-dir

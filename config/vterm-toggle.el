@@ -104,6 +104,17 @@
   (let ((bufs (my/vterm-project-get-buffers root)))
     (select-window (my/vterm-project-show-buffers bufs))))
 
+(defun my/vterm-project-kill-buffer-hook ()
+  "When a tracked vterm buffer is killed, delete its window."
+  (let ((buf (current-buffer)))
+    (dolist (entry my/vterm-project-buffers)
+      (when (memq buf (cdr entry))
+        (let ((win (get-buffer-window buf)))
+          (when (and win (not (one-window-p)))
+            (delete-window win)))))))
+
+(add-hook 'kill-buffer-hook #'my/vterm-project-kill-buffer-hook)
+
 (global-set-key (kbd "s-i") 'my/vterm-project-toggle)
 
 ;;; vterm-toggle.el ends here

@@ -86,12 +86,7 @@ This function should only modify configuration layer settings."
                                       (vterm-anti-flicker-filter
                                        :location
                                        (recipe :fetcher github
-                                               :repo "martinbaillie/vterm-anti-flicker-filter"))
-                                      (mcp-server
-                                       :location
-                                       (recipe :fetcher github
-                                               :repo "rhblind/emacs-mcp-server"
-                                               :files ("*.el" "tools/*.el" "mcp-wrapper.py" "mcp-wrapper.sh"))))
+                                               :repo "martinbaillie/vterm-anti-flicker-filter")))
 
    ;; A list of packages that cannot be updated.
    dotspacemacs-frozen-packages '()
@@ -479,7 +474,7 @@ It should only modify the values of Spacemacs settings."
 
    ;; If non-nil, start an Emacs server if one is not already running.
    ;; (default nil)
-   dotspacemacs-enable-server nil
+   dotspacemacs-enable-server t
 
    ;; Set the emacs server socket location.
    ;; If nil, uses whatever the Emacs default is, otherwise a directory path
@@ -604,8 +599,7 @@ before packages are loaded."
     (dolist (f '("editor"
                  "vterm-toggle"
                  "agent-shell-config"
-                 "claude-code-tweaks"
-                 "mcp-server"))
+                 "claude-code-tweaks"))
       (load (expand-file-name f config-dir)))))
 
 

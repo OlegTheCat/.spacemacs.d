@@ -2,6 +2,8 @@
 
 (require 'multi-vterm)
 
+(setq vterm-max-scrollback 100000)
+
 (defun my/vterm-project-bottom ()
   "Open project vterm at bottom, or a plain vterm if not in a project."
   (interactive)

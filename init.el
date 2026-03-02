@@ -80,7 +80,6 @@ This function should only modify configuration layer settings."
                                        (recipe :fetcher github
                                                :repo "cmacrae/agent-shell-sidebar"))
                                       persistent-scratch
-                                      golden-ratio-scroll-screen
                                       beacon
                                       highlight-symbol
                                       (vterm-anti-flicker-filter
@@ -597,6 +596,7 @@ Put your configuration code here, except for variables that should be set
 before packages are loaded."
   (let ((config-dir (expand-file-name "config/" (file-name-directory dotspacemacs-filepath))))
     (dolist (f '("editor"
+                 "adaptive-scroll"
                  "vterm-toggle"
                  "agent-shell-config"
                  "claude-code-tweaks"))

@@ -23,12 +23,6 @@
 (add-to-list 'golden-ratio-exclude-modes "sr-mode")
 (add-to-list 'golden-ratio-exclude-modes "sr-buttons-mode")
 
-;; Golden ratio scroll
-(require 'golden-ratio-scroll-screen)
-(global-set-key [remap scroll-down-command] 'golden-ratio-scroll-screen-down)
-(global-set-key [remap scroll-up-command] 'golden-ratio-scroll-screen-up)
-(setq golden-ratio-scroll-highlight-flag nil)
-
 ;; Beacon mode
 (beacon-mode 1)
 (setq beacon-size 10)

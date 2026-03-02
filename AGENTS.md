@@ -1,0 +1,25 @@
+## Spacemacs Configuration Layout
+
+```
+~/.spacemacs.d/
+├── init.el       # Main config (layers, packages, settings)
+└── config/       # Modular config files, all loaded by user-config
+
+~/.emacs.d/                    # Spacemacs runtime (DO NOT edit, unless explicitly requested)
+├── core/                      # Spacemacs core framework
+├── layers/                    # Built-in Spacemacs layer definitions
+├── elpa/develop/              # ~325 installed ELPA packages
+└── quelpa/melpa/              # quelpa recipes (for GitHub-sourced packages)
+```
+
+**Key locations in `init.el`:**
+- `dotspacemacs-configuration-layers` — Active Spacemacs layers
+- `dotspacemacs-additional-packages` — Extra packages (GitHub recipes supported)
+- `dotspacemacs/user-config` — Loads all files from `config/` directory
+
+### Adding a new package
+
+1. Add to `dotspacemacs-additional-packages` in `init.el` (use `:location (recipe ...)` for GitHub packages)
+2. Create configuration in `config/*.el`
+3. Add the filename to the `dolist` in `dotspacemacs/user-config`
+4. Load the new config file: `emacsclient --eval '(load ...)'`

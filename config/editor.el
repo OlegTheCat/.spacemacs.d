@@ -75,4 +75,10 @@
 (require 'reverse-im)
 (reverse-im-activate "ukrainian-computer")
 
+;; MC keybindings
+(global-set-key (kbd "C-S-c C-S-c") 'mc/edit-lines)
+(global-set-key (kbd "C->") 'mc/mark-next-like-this)
+(global-set-key (kbd "C-<") 'mc/mark-previous-like-this)
+(global-set-key (kbd "C-c C-<") 'mc/mark-all-like-this)
+
 ;;; editor.el ends here

@@ -71,4 +71,8 @@
           (lambda ()
             (face-remap-add-relative 'default :family "Menlo")))
 
+;; Reverse IM: use Latin keybindings with non-Latin keyboard layouts
+(require 'reverse-im)
+(reverse-im-activate "ukrainian-computer")
+
 ;;; editor.el ends here

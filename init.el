@@ -85,6 +85,7 @@ This function should only modify configuration layer settings."
                                       beacon
                                       highlight-symbol
                                       reverse-im
+                                      vdiff
                                       (vterm-anti-flicker-filter
                                        :location
                                        (recipe :fetcher github
@@ -602,7 +603,8 @@ before packages are loaded."
                  "adaptive-scroll"
                  "vterm-toggle"
                  "agent-shell-config"
-                 "claude-code-tweaks"))
+                 "claude-code-tweaks"
+                 "quick-diff"))
       (load (expand-file-name f config-dir)))))
 
 
@@ -663,7 +665,7 @@ This function is called at the very end of Spacemacs initialization."
                 tagedit term-cursor terminal-here tern tide toc-org toml-mode
                 treemacs-icons-dired treemacs-magit treemacs-persp
                 treemacs-projectile typescript-mode undo-fu-session unfill uuidgen
-                uv vi-tilde-fringe volatile-highlights vundo web-beautify
+                uv vdiff vi-tilde-fringe volatile-highlights vundo web-beautify
                 web-completion-data web-mode wgrep winum writeroom-mode ws-butler
                 xcscope yaml-mode yapfify yasnippet-snippets zenburn-theme))
    '(safe-local-variable-values

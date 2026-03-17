@@ -86,6 +86,10 @@ This function should only modify configuration layer settings."
                                       highlight-symbol
                                       reverse-im
                                       vdiff
+                                      (flash
+                                       :location
+                                       (recipe :fetcher github
+                                               :repo "Prgebish/flash"))
                                       (vterm-anti-flicker-filter
                                        :location
                                        (recipe :fetcher github
@@ -636,7 +640,7 @@ This function is called at the very end of Spacemacs initialization."
                 evil-indent-plus evil-lion evil-lisp-state evil-matchit
                 evil-nerd-commenter evil-numbers evil-surround evil-textobj-line
                 evil-tutor evil-unimpaired evil-visual-mark-mode evil-visualstar
-                expand-region eyebrowse fancy-battery flycheck flycheck-elsa
+                expand-region eyebrowse fancy-battery flash flycheck flycheck-elsa
                 flycheck-package flycheck-pos-tip forge ggtags gh-md git-link
                 git-messenger git-modes git-timemachine gitignore-templates
                 golden-ratio golden-ratio-scroll-screen google-translate grizzl

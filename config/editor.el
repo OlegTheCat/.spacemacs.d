@@ -81,4 +81,8 @@
 (global-set-key (kbd "C-<") 'mc/mark-previous-like-this)
 (global-set-key (kbd "C-c C-<") 'mc/mark-all-like-this)
 
+;; Flash jump
+(require 'flash)
+(global-set-key (kbd "s-j") 'flash-jump)
+
 ;;; editor.el ends here

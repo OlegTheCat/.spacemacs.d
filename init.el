@@ -93,7 +93,8 @@ This function should only modify configuration layer settings."
                                       (vterm-anti-flicker-filter
                                        :location
                                        (recipe :fetcher github
-                                               :repo "martinbaillie/vterm-anti-flicker-filter")))
+                                               :repo "martinbaillie/vterm-anti-flicker-filter"))
+                                      eca)
 
    ;; A list of packages that cannot be updated.
    dotspacemacs-frozen-packages '()
@@ -608,7 +609,8 @@ before packages are loaded."
                  "vterm-toggle"
                  "agent-shell-config"
                  "claude-code-tweaks"
-                 "quick-diff"))
+                 "quick-diff"
+                 "eca-config"))
       (load (expand-file-name f config-dir)))))
 
 
@@ -633,37 +635,38 @@ This function is called at the very end of Spacemacs initialization."
                 counsel counsel-css csv-mode ctable cython-mode dap-mode deferred
                 define-word devdocs diff-hl diminish dired-quick-sort
                 disable-mouse doom-themes dotenv-mode dracula-theme drag-stuff
-                dumb-jump eat edit-indirect elisp-def elisp-demos elisp-slime-nav
-                emmet-mode emr epc esh-help eshell-prompt-extras eshell-z
-                eval-sexp-fu evil-anzu evil-args evil-cleverparens evil-escape
-                evil-evilified-state evil-exchange evil-goggles evil-iedit-state
-                evil-indent-plus evil-lion evil-lisp-state evil-matchit
-                evil-nerd-commenter evil-numbers evil-surround evil-textobj-line
-                evil-tutor evil-unimpaired evil-visual-mark-mode evil-visualstar
-                expand-region eyebrowse fancy-battery flash flycheck flycheck-elsa
-                flycheck-package flycheck-pos-tip forge ggtags gh-md git-link
-                git-messenger git-modes git-timemachine gitignore-templates
-                golden-ratio golden-ratio-scroll-screen google-translate grizzl
-                gruvbox-theme haml-mode helm-ag helm-c-yasnippet helm-cider
-                helm-comint helm-company helm-cscope helm-css-scss helm-descbinds
-                helm-ls-git helm-lsp helm-make helm-mode-manager helm-org
-                helm-projectile helm-purpose helm-pydoc helm-swoop helm-xref
-                hide-comnt highlight-indentation highlight-numbers
-                highlight-parentheses highlight-symbol hl-todo holy-mode htmlize
-                hungry-delete hybrid-mode impatient-mode import-js importmagic
-                indent-guide info+ inspector ivy js-doc js2-mode js2-refactor
-                link-hint live-py-mode livid-mode load-env-vars lorem-ipsum
-                lsp-docker lsp-mode lsp-origami lsp-pyright lsp-treemacs lsp-ui
-                macrostep markdown-toc material-theme mcp-server monokai-theme
-                multi-line multi-term multi-vterm multiple-cursors mwim nameless
-                nodejs-repl nord-theme nose npm-mode open-junk-file org-superstar
-                origami overseer package-lint page-break-lines paradox
-                password-generator pcre2el persistent-scratch pet pip-requirements
-                pipenv pippel poetry popwin pos-tip prettier-js pug-mode py-isort
-                pydoc pyenv-mode pylookup python-pytest pythonic pyvenv quickrun
-                rainbow-delimiters reformatter restart-emacs restclient reverse-im
-                ruff-format sass-mode scss-mode shell-maker shell-pop simple-httpd
-                skewer-mode slim-mode smeargle solarized-theme space-doc spaceline
+                dumb-jump eat eca edit-indirect elisp-def elisp-demos
+                elisp-slime-nav emmet-mode emr epc esh-help eshell-prompt-extras
+                eshell-z eval-sexp-fu evil-anzu evil-args evil-cleverparens
+                evil-escape evil-evilified-state evil-exchange evil-goggles
+                evil-iedit-state evil-indent-plus evil-lion evil-lisp-state
+                evil-matchit evil-nerd-commenter evil-numbers evil-surround
+                evil-textobj-line evil-tutor evil-unimpaired evil-visual-mark-mode
+                evil-visualstar expand-region eyebrowse fancy-battery flash
+                flycheck flycheck-elsa flycheck-package flycheck-pos-tip forge
+                ggtags gh-md git-link git-messenger git-modes git-timemachine
+                gitignore-templates golden-ratio golden-ratio-scroll-screen
+                google-translate grizzl gruvbox-theme haml-mode helm-ag
+                helm-c-yasnippet helm-cider helm-comint helm-company helm-cscope
+                helm-css-scss helm-descbinds helm-ls-git helm-lsp helm-make
+                helm-mode-manager helm-org helm-projectile helm-purpose helm-pydoc
+                helm-swoop helm-xref hide-comnt highlight-indentation
+                highlight-numbers highlight-parentheses highlight-symbol hl-todo
+                holy-mode htmlize hungry-delete hybrid-mode impatient-mode
+                import-js importmagic indent-guide info+ inspector ivy js-doc
+                js2-mode js2-refactor link-hint live-py-mode livid-mode
+                load-env-vars lorem-ipsum lsp-docker lsp-mode lsp-origami
+                lsp-pyright lsp-treemacs lsp-ui macrostep markdown-toc
+                material-theme mcp-server monokai-theme multi-line multi-term
+                multi-vterm multiple-cursors mwim nameless nodejs-repl nord-theme
+                nose npm-mode open-junk-file org-superstar origami overseer
+                package-lint page-break-lines paradox password-generator pcre2el
+                persistent-scratch pet pip-requirements pipenv pippel poetry
+                popwin pos-tip prettier-js pug-mode py-isort pydoc pyenv-mode
+                pylookup python-pytest pythonic pyvenv quickrun rainbow-delimiters
+                reformatter restart-emacs restclient reverse-im ruff-format
+                sass-mode scss-mode shell-maker shell-pop simple-httpd skewer-mode
+                slim-mode smeargle solarized-theme space-doc spaceline
                 spacemacs-purpose-popwin spacemacs-whitespace-cleanup sphinx-doc
                 string-edit-at-point string-inflection swiper symbol-overlay symon
                 tagedit term-cursor terminal-here tern tide toc-org toml-mode

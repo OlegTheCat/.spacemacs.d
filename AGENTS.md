@@ -8,8 +8,8 @@
 ~/.emacs.d/                    # Spacemacs runtime (DO NOT edit, unless explicitly requested)
 ├── core/                      # Spacemacs core framework
 ├── layers/                    # Built-in Spacemacs layer definitions
-├── elpa/develop/              # ~325 installed ELPA packages
-└── quelpa/melpa/              # quelpa recipes (for GitHub-sourced packages)
+├── elpa/                      # installed ELPA packages
+└── quelpa/              # quelpa recipes (for GitHub-sourced packages)
 ```
 
 **Key locations in `init.el`:**

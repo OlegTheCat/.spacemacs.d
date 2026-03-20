@@ -60,6 +60,6 @@
       (agent-shell-sidebar--create-and-show-sidebar
        :project-root project-root)))))
 
-
+(global-set-key (kbd "s-l") #'my/agent-shell-sidebar-smart-toggle)
 
 ;;; agent-shell-config.el ends here

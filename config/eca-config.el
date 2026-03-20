@@ -5,7 +5,10 @@
 
 (setq eca-chat-use-side-window nil
       eca-chat-focus-on-open t
+      eca-chat-auto-add-cursor t
       eca-chat-custom-model "anthropic/claude-opus-4-6")
+
+(setq markdown-hide-markup-in-view-modes nil)
 
 (defun my/eca--display-right (buffer)
   "Display BUFFER in a right split, bypassing purpose-mode.
@@ -50,4 +53,5 @@ Locally overrides `display-buffer-overriding-action' so that
              (window-width . 0.5))))
       (call-interactively #'eca))))
 
-(global-set-key (kbd "s-l") #'my/eca-smart-toggle)
+;; Use agent-shell for now
+;; (global-set-key (kbd "s-l") #'my/eca-smart-toggle)

@@ -108,8 +108,12 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
                            output)))
 (advice-add 'ghostel--filter :around #'my/ghostel-replace-bullet)
 
-;; Send C-v to the terminal (scroll-up is only useful in copy mode,
-;; where it's already bound separately).
+;; Send C-b / C-f / C-v to the terminal — ghostel's keymap omits these,
+;; so Emacs intercepts them as backward-char / forward-char / scroll-up.
+(define-key ghostel-mode-map (kbd "C-b")
+  (lambda () (interactive) (ghostel--send-key "\x02")))
+(define-key ghostel-mode-map (kbd "C-f")
+  (lambda () (interactive) (ghostel--send-key "\x06")))
 (define-key ghostel-mode-map (kbd "C-v")
   (lambda () (interactive) (ghostel--send-key "\x16")))
 

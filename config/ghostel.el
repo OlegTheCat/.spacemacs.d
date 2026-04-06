@@ -108,18 +108,9 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
                            output)))
 (advice-add 'ghostel--filter :around #'my/ghostel-replace-bullet)
 
-;; Send C-b / C-f / C-v to the terminal — ghostel's keymap omits these,
-;; so Emacs intercepts them as backward-char / forward-char / scroll-up.
-(define-key ghostel-mode-map (kbd "C-b")
-  (lambda () (interactive) (ghostel--send-key "\x02")))
-(define-key ghostel-mode-map (kbd "C-f")
-  (lambda () (interactive) (ghostel--send-key "\x06")))
-(define-key ghostel-mode-map (kbd "C-v")
-  (lambda () (interactive) (ghostel--send-key "\x16")))
-
 ;; Send M-b / M-f to the terminal for word navigation in the shell.
-;; ghostel--send-event delegates to ghostel--raw-key-sequence which has
-;; no Meta+letter handler, so we send ESC+letter directly.
+;; ghostel--raw-key-sequence has no Meta+letter handler, so we send
+;; ESC+letter directly.
 (define-key ghostel-mode-map (kbd "M-b")
   (lambda () (interactive) (ghostel--send-key "\eb")))
 (define-key ghostel-mode-map (kbd "M-f")

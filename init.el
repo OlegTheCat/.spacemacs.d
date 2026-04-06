@@ -63,9 +63,6 @@ This function should only modify configuration layer settings."
      ;; syntax-checking
      version-control
      (llm-client :variables llm-client-enable-gptel t)
-     (claude-code :variables
-                  claude-code-ide-window-width 120
-                  claude-code-ide-use-ide-diff nil)
      treemacs)
 
 
@@ -91,11 +88,6 @@ This function should only modify configuration layer settings."
                                        :location
                                        (recipe :fetcher github
                                                :repo "Prgebish/flash"))
-                                      (vterm-anti-flicker-filter
-                                       :location
-                                       (recipe :fetcher github
-                                               :repo "martinbaillie/vterm-anti-flicker-filter"))
-                                      eca
                                       (ghostel
                                        :location
                                        (recipe :fetcher github
@@ -613,9 +605,7 @@ before packages are loaded."
                  "adaptive-scroll"
                  "vterm-toggle"
                  "agent-shell-config"
-                 "claude-code-tweaks"
                  "quick-diff"
-                 "eca-config"
                  "ghostel"))
       (load (expand-file-name f config-dir)))))
 
@@ -641,7 +631,7 @@ This function is called at the very end of Spacemacs initialization."
                 counsel counsel-css csv-mode ctable cython-mode dap-mode deferred
                 define-word devdocs diff-hl diminish dired-quick-sort
                 disable-mouse doom-themes dotenv-mode dracula-theme drag-stuff
-                dumb-jump eat eca edit-indirect elisp-def elisp-demos
+                dumb-jump eat edit-indirect elisp-def elisp-demos
                 elisp-slime-nav ellama emmet-mode emr epc esh-help
                 eshell-prompt-extras eshell-z eval-sexp-fu evil-anzu evil-args
                 evil-cleverparens evil-escape evil-evilified-state evil-exchange

@@ -70,6 +70,9 @@
 (add-hook 'vterm-mode-hook
           (lambda ()
             (face-remap-add-relative 'default :family "Menlo")))
+(add-hook 'ghostel-mode-hook
+          (lambda ()
+            (face-remap-add-relative 'default :family "Menlo")))
 
 ;; Reverse IM: use Latin keybindings with non-Latin keyboard layouts
 (require 'reverse-im)
@@ -84,5 +87,12 @@
 ;; Flash jump
 (require 'flash)
 (global-set-key (kbd "s-j") 'flash-jump)
+
+;; GPTel: use Claude as default backend
+(with-eval-after-load 'gptel
+  (setq gptel-backend (gptel-make-anthropic "Claude"
+                        :stream t
+                        :key (lambda () (getenv "ANTHROPIC_API_KEY")))
+        gptel-model 'claude-opus-4-6))
 
 ;;; editor.el ends here

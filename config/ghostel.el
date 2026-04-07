@@ -34,9 +34,11 @@
   (let ((buf (ghostel-claude--get-buffer root)))
     (when buf (get-buffer-window buf t))))
 
-(defun ghostel-claude--create (root)
-  "Create a new ghostel terminal running `claude' in ROOT."
+(defun ghostel-claude--create (root &optional resume)
+  "Create a new ghostel terminal running `claude' in ROOT.
+When RESUME is non-nil, run `claude --resume' instead."
   (let* ((default-directory root)
+         (cmd (if resume "claude --resume\n" "claude\n"))
          (buf (save-window-excursion
                 (ghostel)
                 (current-buffer))))
@@ -48,7 +50,7 @@
                      (when (and (buffer-live-p buf)
                                 (process-live-p (buffer-local-value 'ghostel--process buf)))
                        (with-current-buffer buf
-                         (process-send-string ghostel--process "claude\n"))))))
+                         (process-send-string ghostel--process cmd))))))
     (setf (alist-get root ghostel-claude--buffer-alist nil nil #'equal) buf)
     buf))
 
@@ -63,12 +65,13 @@
     (window-preserve-size win t t)
     win))
 
-(defun ghostel-claude-toggle ()
+(defun ghostel-claude-toggle (arg)
   "Smart toggle for ghostel+claude sidebar.
+With prefix ARG (C-u), create with `claude --resume'.
 1. Not visible → show (create if needed).
 2. Visible + focused → hide.
 3. Visible + not focused → focus."
-  (interactive)
+  (interactive "P")
   ;; When inside a sidebar buffer, use its stored root to avoid cwd drift.
   (let* ((sidebar-root (and (derived-mode-p 'ghostel-mode)
                             ghostel-claude--project-root))
@@ -94,7 +97,7 @@
      ;; No buffer → create + show
      (t
       (setq ghostel-claude--last-window (selected-window))
-      (let ((new-buf (ghostel-claude--create root)))
+      (let ((new-buf (ghostel-claude--create root arg)))
         (select-window (ghostel-claude--show-sidebar new-buf)))))))
 
 ;; Replace ⏺ (U+23FA) with ● (U+25CF) in ghostel output before rendering,
@@ -108,13 +111,13 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
                            output)))
 (advice-add 'ghostel--filter :around #'my/ghostel-replace-bullet)
 
-;; Send M-b / M-f to the terminal for word navigation in the shell.
+;; Send Meta+letter keys to the terminal for shell line editing.
 ;; ghostel--raw-key-sequence has no Meta+letter handler, so we send
 ;; ESC+letter directly.
-(define-key ghostel-mode-map (kbd "M-b")
-  (lambda () (interactive) (ghostel--send-key "\eb")))
-(define-key ghostel-mode-map (kbd "M-f")
-  (lambda () (interactive) (ghostel--send-key "\ef")))
+(dolist (key '("b" "f" "d"))
+  (define-key ghostel-mode-map (kbd (concat "M-" key))
+    (let ((seq (concat "\e" key)))
+      (lambda () (interactive) (ghostel--send-key seq)))))
 
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 

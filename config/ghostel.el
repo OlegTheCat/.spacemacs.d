@@ -67,12 +67,29 @@ When RESUME is non-nil, run `claude --resume' instead."
     (window-preserve-size win t t)
     win))
 
+(defun ghostel-claude--send-region (buf)
+  "Send the active region with file context to the ghostel+claude BUF."
+  (let* ((beg (region-beginning))
+         (end (region-end))
+         (text (buffer-substring-no-properties beg end))
+         (file (let ((f (or (buffer-file-name) (buffer-name)))
+                     (root (and (fboundp 'projectile-project-root)
+                                (ignore-errors (projectile-project-root)))))
+                 (if root (file-relative-name f root) f)))
+         (line-beg (line-number-at-pos beg))
+         (line-end (line-number-at-pos end))
+         (formatted (format "%s:%d-%d\n```\n%s\n```" file line-beg line-end text)))
+    (deactivate-mark)
+    (with-current-buffer buf
+      (ghostel--paste-text formatted))))
+
 (defun ghostel-claude-toggle (arg)
   "Smart toggle for ghostel+claude sidebar.
 With prefix ARG (C-u), create with `claude --resume'.
 1. Not visible → show (create if needed).
 2. Visible + focused → hide.
-3. Visible + not focused → focus."
+3. Visible + not focused + region → send region & focus.
+4. Visible + not focused → focus."
   (interactive "P")
   ;; When inside a sidebar buffer, use its stored root to avoid cwd drift.
   (let* ((sidebar-root (and (derived-mode-p 'ghostel-mode)
@@ -88,6 +105,11 @@ With prefix ARG (C-u), create with `claude --resume'.
                  (window-live-p ghostel-claude--last-window))
         (select-window ghostel-claude--last-window))
       (delete-window win))
+     ;; Visible + not focused + region → send region & focus
+     ((and win (use-region-p))
+      (ghostel-claude--send-region buf)
+      (setq ghostel-claude--last-window (selected-window))
+      (select-window win))
      ;; Visible + not focused → focus
      (win
       (setq ghostel-claude--last-window (selected-window))

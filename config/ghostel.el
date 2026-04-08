@@ -2,6 +2,8 @@
 
 (require 'ghostel)
 
+(setq ghostel-copy-mode-auto-load-scrollback t)
+
 (defvar ghostel-claude--buffer-alist nil
   "Alist mapping project-root strings to ghostel+claude buffer objects.")
 

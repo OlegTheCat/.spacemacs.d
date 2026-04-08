@@ -111,14 +111,6 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
                            output)))
 (advice-add 'ghostel--filter :around #'my/ghostel-replace-bullet)
 
-;; Send Meta+letter keys to the terminal for shell line editing.
-;; ghostel--raw-key-sequence has no Meta+letter handler, so we send
-;; ESC+letter directly.
-(dolist (key '("b" "f" "d"))
-  (define-key ghostel-mode-map (kbd (concat "M-" key))
-    (let ((seq (concat "\e" key)))
-      (lambda () (interactive) (ghostel--send-key seq)))))
-
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 
 (global-set-key (kbd "s-l") #'ghostel-claude-toggle)

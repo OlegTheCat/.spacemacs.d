@@ -135,6 +135,11 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
                            output)))
 (advice-add 'ghostel--filter :around #'my/ghostel-replace-bullet)
 
+;; Use adaptive scroll in copy mode instead of full-page jumps.
+;; ghostel calls scroll-up/down-command directly, bypassing the remap.
+(define-key ghostel-copy-mode-map (kbd "C-v") #'adaptive-scroll-down)
+(define-key ghostel-copy-mode-map (kbd "M-v") #'adaptive-scroll-up)
+
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 
 (global-set-key (kbd "s-l") #'ghostel-claude-toggle)

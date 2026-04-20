@@ -140,6 +140,17 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
 (define-key ghostel-copy-mode-map (kbd "C-v") #'adaptive-scroll-down)
 (define-key ghostel-copy-mode-map (kbd "M-v") #'adaptive-scroll-up)
 
+;; M-v in normal ghostel mode enters copy mode and scrolls up.
+(defun ghostel-enter-copy-mode-and-scroll-up ()
+  "Enter copy mode and immediately scroll up one adaptive step."
+  (interactive)
+  (ghostel-copy-mode)
+  (adaptive-scroll-up))
+(define-key ghostel-mode-map (kbd "M-v") #'ghostel-enter-copy-mode-and-scroll-up)
+
+;; M-> in copy mode exits back to the live terminal.
+(define-key ghostel-copy-mode-map (kbd "M->") #'ghostel-copy-mode-exit)
+
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 
 (global-set-key (kbd "s-l") #'ghostel-claude-toggle)

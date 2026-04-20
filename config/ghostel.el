@@ -151,6 +151,19 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
 ;; M-> in copy mode exits back to the live terminal.
 (define-key ghostel-copy-mode-map (kbd "M->") #'ghostel-copy-mode-exit)
 
+;; Copy in copy mode without auto-exiting.
+(defun ghostel-copy-mode-copy-stay ()
+  "Copy the selected region but stay in copy mode."
+  (interactive)
+  (when (use-region-p)
+    (let ((text (ghostel--clean-copy-text
+                 (buffer-substring (region-beginning) (region-end)))))
+      (kill-new text)
+      (deactivate-mark)
+      (message "Copied to kill ring"))))
+(define-key ghostel-copy-mode-map (kbd "M-w") #'ghostel-copy-mode-copy-stay)
+(define-key ghostel-copy-mode-map (kbd "C-w") #'ghostel-copy-mode-copy-stay)
+
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 
 (global-set-key (kbd "s-l") #'ghostel-claude-toggle)

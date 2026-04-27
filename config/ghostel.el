@@ -81,7 +81,7 @@ When RESUME is non-nil, run `claude --resume' instead."
          (formatted (format "%s:%d-%d\n```\n%s\n```" file line-beg line-end text)))
     (deactivate-mark)
     (with-current-buffer buf
-      (ghostel--paste-text formatted))))
+      (ghostel-paste-string formatted))))
 
 (defun ghostel-claude-toggle (arg)
   "Smart toggle for ghostel+claude sidebar.

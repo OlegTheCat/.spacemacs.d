@@ -64,6 +64,7 @@
 (add-hook 'prog-mode-hook 'highlight-symbol-nav-mode)
 
 ;; Custom keybindings
+(global-unset-key (kbd "s-k"))
 (global-set-key (kbd "C-s") 'helm-occur)
 
 ;; Use Menlo for vterm/Claude Code buffers.

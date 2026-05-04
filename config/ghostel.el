@@ -129,34 +129,48 @@ When RESUME is non-nil, include the profile's resume arguments."
     (with-current-buffer buf
       (process-send-string ghostel--process (concat command "\n")))))
 
+(defun ghostel-agent--display-sidebar-window (buf)
+  "Display BUF in a side window and return that window."
+  (display-buffer-in-side-window
+   buf `((side . ,ghostel-agent-side)
+         (slot . 0)
+         (window-width . ,ghostel-agent-width)
+         (window-parameters . ((no-delete-other-windows . t))))))
+
+(defun ghostel-agent--finish-sidebar-window (win)
+  "Apply sidebar window settings to WIN."
+  (when (window-live-p win)
+    (set-window-dedicated-p win t)
+    (window-preserve-size win t t))
+  win)
+
 (defun ghostel-agent--create (agent root &optional resume)
-  "Create a new ghostel terminal running AGENT in ROOT.
+  "Create a new ghostel terminal running AGENT in ROOT and return its window.
 When RESUME is non-nil, use the agent profile's resume arguments."
   (let* ((profile (ghostel-agent--profile agent))
          (default-directory root)
          (command (ghostel-agent--command-line profile resume))
-         (buf (save-window-excursion
-                (let ((ghostel-buffer-name (plist-get profile :buffer-name)))
-                  (ghostel t)
-                  (current-buffer)))))
+         (buf (generate-new-buffer (plist-get profile :buffer-name))))
     (with-current-buffer buf
-      (setq ghostel-agent--agent agent
-            ghostel-agent--project-root root))
-    (run-at-time ghostel-agent-command-delay nil
-                 #'ghostel-agent--send-command buf command)
-    (setf (alist-get (ghostel-agent--key agent root)
-                     ghostel-agent--buffer-alist nil nil #'equal) buf)
-    buf))
+      (setq default-directory root))
+    (let ((win (ghostel-agent--display-sidebar-window buf)))
+      (select-window win)
+      (let ((ghostel-buffer-name (buffer-name buf)))
+        (setq buf (ghostel nil)))
+      (ghostel-agent--finish-sidebar-window win)
+      (with-current-buffer buf
+        (setq ghostel-agent--agent agent
+              ghostel-agent--project-root root))
+      (run-at-time ghostel-agent-command-delay nil
+                   #'ghostel-agent--send-command buf command)
+      (setf (alist-get (ghostel-agent--key agent root)
+                       ghostel-agent--buffer-alist nil nil #'equal) buf)
+      win)))
 
 (defun ghostel-agent--show-sidebar (buf)
   "Display BUF in a side window."
-  (let ((win (display-buffer-in-side-window
-              buf `((side . ,ghostel-agent-side)
-                    (slot . 0)
-                    (window-width . ,ghostel-agent-width)
-                    (window-parameters . ((no-delete-other-windows . t)))))))
-    (set-window-dedicated-p win t)
-    (window-preserve-size win t t)
+  (let ((win (ghostel-agent--display-sidebar-window buf)))
+    (ghostel-agent--finish-sidebar-window win)
     win))
 
 (defun ghostel-agent--send-region (buf)
@@ -217,8 +231,7 @@ When FORCE-SHOW is non-nil, focus the sidebar instead of hiding it.
      ;; No buffer → create + show
      (t
       (setq ghostel-agent--last-window (selected-window))
-      (let ((new-buf (ghostel-agent--create agent root resume)))
-        (select-window (ghostel-agent--show-sidebar new-buf)))))))
+      (select-window (ghostel-agent--create agent root resume))))))
 
 (defun ghostel-agent--parse-prefix (arg)
   "Return (AGENT RESUME EXPLICIT) for raw prefix ARG.

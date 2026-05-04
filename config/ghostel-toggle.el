@@ -40,6 +40,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "s-<left>") #'ghostel-toggle-previous-session)
     (define-key map (kbd "s-<right>") #'ghostel-toggle-next-session)
+    (define-key map (kbd "s-t") #'ghostel-toggle-new-session)
     map)
   "Keymap active in managed Ghostel terminal buffers.")
 
@@ -429,6 +430,15 @@ SELECTED-ID is the selected session id for this project."
                (window-live-p ghostel-toggle--last-window))
       (select-window ghostel-toggle--last-window))))
 
+(defun ghostel-toggle-new-session ()
+  "Create a new Ghostel terminal tab for the current project."
+  (interactive)
+  (let* ((root (or (ghostel-toggle--current-root)
+                   (ghostel-toggle--project-root)))
+         (root (ghostel-toggle--normalize-root root)))
+    (ghostel-toggle--remember-last-window)
+    (select-window (ghostel-toggle--create root))))
+
 (defun ghostel-toggle ()
   "Toggle the project Ghostel terminal drawer.
 With a prefix argument, create a new terminal tab for the project."
@@ -437,9 +447,7 @@ With a prefix argument, create a new terminal tab for the project."
                    (ghostel-toggle--project-root)))
          (root (ghostel-toggle--normalize-root root)))
     (if current-prefix-arg
-        (progn
-          (ghostel-toggle--remember-last-window)
-          (select-window (ghostel-toggle--create root)))
+        (ghostel-toggle-new-session)
       (let ((session (ghostel-toggle--default-session root)))
         (cond
          ((ghostel-toggle--root-visible-p root)
@@ -483,6 +491,8 @@ With a prefix argument, create a new terminal tab for the project."
 
 (add-hook 'ghostel-exit-functions #'ghostel-toggle--after-exit)
 (add-hook 'kill-buffer-hook #'ghostel-toggle--kill-buffer-hook)
+
+(define-key ghostel-toggle-session-mode-map (kbd "s-t") #'ghostel-toggle-new-session)
 
 (global-set-key (kbd "s-i") #'ghostel-toggle)
 

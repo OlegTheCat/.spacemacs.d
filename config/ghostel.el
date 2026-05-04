@@ -1,7 +1,8 @@
 ;;; ghostel.el --- Ghostel agent sidebars -*- lexical-binding: t -*-
 
-(require 'ghostel)
 (require 'cl-lib)
+(require 'seq)
+(require 'ghostel)
 
 (setq ghostel-copy-mode-auto-load-scrollback t)
 
@@ -16,17 +17,22 @@
      :program "codex"
      :args nil
      :resume-args ("resume")))
-  "Agent profiles available through `ghostel-agent-toggle-command'.")
+  "Agent profiles available through ghostel agent commands.")
 
-(defvar ghostel-agent--buffer-alist
-  (when (boundp 'ghostel-claude--buffer-alist)
-    (mapcar (lambda (entry)
-              (cons (cons 'claude (car entry)) (cdr entry)))
-            (symbol-value 'ghostel-claude--buffer-alist)))
-  "Alist mapping (AGENT . PROJECT-ROOT) keys to ghostel agent buffers.")
+(defvar ghostel-agent--sessions nil
+  "Alist mapping ghostel agent session ids to session plists.")
 
-(defvar ghostel-agent--selected-agent-alist nil
-  "Alist mapping project-root strings to the selected ghostel agent.")
+(defvar ghostel-agent--selected-session-alist nil
+  "Alist mapping project-root strings to the selected session id.")
+
+(defvar ghostel-agent--last-session-alist nil
+  "Alist mapping (AGENT . PROJECT-ROOT) keys to selected session ids.")
+
+(defvar ghostel-agent--session-counter 0
+  "Monotonic counter used to allocate ghostel agent session ids.")
+
+(defvar-local ghostel-agent--session-id nil
+  "Session id this ghostel buffer belongs to.")
 
 (defvar-local ghostel-agent--agent nil
   "Agent this ghostel buffer belongs to.")
@@ -46,21 +52,42 @@
 (defvar ghostel-agent-command-delay 0.3
   "Seconds to wait before sending the agent command to a new shell.")
 
+(defface ghostel-agent-tab-current
+  '((t :inherit tab-line-tab-current :weight bold :underline t))
+  "Face for the selected ghostel agent session tab.")
+
+(defface ghostel-agent-tab
+  '((t :inherit tab-line-tab))
+  "Face for inactive ghostel agent session tabs.")
+
+(defvar ghostel-agent-session-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "s-<left>") #'ghostel-agent-previous-session)
+    (define-key map (kbd "s-<right>") #'ghostel-agent-next-session)
+    map)
+  "Keymap active in managed ghostel agent session buffers.")
+
+(define-minor-mode ghostel-agent-session-mode
+  "Minor mode for ghostel buffers managed by the agent sidebar."
+  :init-value nil
+  :lighter nil
+  :keymap ghostel-agent-session-mode-map)
+
 (defun ghostel-agent--profile (agent)
   "Return the profile plist for AGENT."
   (or (cdr (assq agent ghostel-agent-profiles))
       (user-error "Unknown ghostel agent: %S" agent)))
 
-(defun ghostel-agent--key (agent root)
-  "Return the buffer registry key for AGENT in ROOT."
-  (cons agent (ghostel-agent--normalize-root root)))
-
 (defun ghostel-agent--normalize-root (root)
   "Return ROOT as a canonical project directory string."
   (file-name-as-directory (expand-file-name root)))
 
-(defun ghostel-agent--buffer-name (agent root)
-  "Return the project-specific Ghostel buffer identity for AGENT in ROOT."
+(defun ghostel-agent--key (agent root)
+  "Return the registry key for AGENT in ROOT."
+  (cons agent (ghostel-agent--normalize-root root)))
+
+(defun ghostel-agent--buffer-name (agent root session-id)
+  "Return the project/session-specific Ghostel identity for AGENT in ROOT."
   ;; Ghostel reuses buffers by `ghostel--buffer-identity', even after
   ;; title tracking renames the visible buffer.
   (let* ((root (ghostel-agent--normalize-root root))
@@ -68,34 +95,124 @@
          (project-name (file-name-nondirectory dir))
          (project-label (if (string= project-name "") "root" project-name))
          (root-hash (substring (secure-hash 'sha1 root) 0 8)))
-    (format "*ghostel-%s:%s:%s*" agent project-label root-hash)))
+    (format "*ghostel-%s:%s:%s:%s*"
+            agent project-label root-hash session-id)))
+
+(defun ghostel-agent--next-session-id ()
+  "Return a fresh ghostel agent session id."
+  (setq ghostel-agent--session-counter
+        (1+ ghostel-agent--session-counter))
+  (format "ghostel-agent-session-%d" ghostel-agent--session-counter))
+
+(defun ghostel-agent--session-by-id (id)
+  "Return the session plist for ID, or nil."
+  (cdr (assoc id ghostel-agent--sessions)))
+
+(defun ghostel-agent--session-buffer (session)
+  "Return SESSION's live buffer, or nil."
+  (let ((buf (plist-get session :buffer)))
+    (when (buffer-live-p buf)
+      buf)))
+
+(defun ghostel-agent--session-live-p (session)
+  "Return non-nil when SESSION has a live buffer."
+  (and (plist-get session :id)
+       (ghostel-agent--session-buffer session)))
+
+(defun ghostel-agent--live-session-by-id (id)
+  "Return the live session plist for ID, or nil."
+  (let ((session (ghostel-agent--session-by-id id)))
+    (when (and session (ghostel-agent--session-live-p session))
+      session)))
+
+(defun ghostel-agent--cleanup-sessions ()
+  "Drop registry entries whose buffers were killed."
+  (let (live-ids)
+    (setq ghostel-agent--sessions
+          (cl-remove-if-not
+           (lambda (entry)
+             (when (ghostel-agent--session-live-p (cdr entry))
+               (push (car entry) live-ids)
+               t))
+           ghostel-agent--sessions))
+    (setq ghostel-agent--selected-session-alist
+          (cl-remove-if-not
+           (lambda (entry) (member (cdr entry) live-ids))
+           ghostel-agent--selected-session-alist))
+    (setq ghostel-agent--last-session-alist
+          (cl-remove-if-not
+           (lambda (entry) (member (cdr entry) live-ids))
+           ghostel-agent--last-session-alist))))
+
+(defun ghostel-agent--session-for-buffer (buf)
+  "Return the session plist for BUF, or nil."
+  (seq-find (lambda (session)
+              (eq (plist-get session :buffer) buf))
+            (mapcar #'cdr ghostel-agent--sessions)))
+
+(defun ghostel-agent--agent-name (agent)
+  "Return a display name for AGENT."
+  (capitalize (symbol-name agent)))
 
 (defun ghostel-agent--current-agent ()
   "Return the agent for the current ghostel buffer, or nil."
   (when (derived-mode-p 'ghostel-mode)
-    (or (bound-and-true-p ghostel-agent--agent)
+    (or (when-let* ((id (bound-and-true-p ghostel-agent--session-id))
+                    (session (ghostel-agent--live-session-by-id id)))
+          (plist-get session :agent))
+        (bound-and-true-p ghostel-agent--agent)
         (and (bound-and-true-p ghostel-claude--project-root) 'claude))))
 
 (defun ghostel-agent--current-root ()
   "Return the project root for the current ghostel agent buffer, or nil."
   (when (derived-mode-p 'ghostel-mode)
-    (let ((root (or (bound-and-true-p ghostel-agent--project-root)
+    (let ((root (or (when-let* ((id (bound-and-true-p ghostel-agent--session-id))
+                                (session (ghostel-agent--live-session-by-id id)))
+                      (plist-get session :root))
+                    (bound-and-true-p ghostel-agent--project-root)
                     (bound-and-true-p ghostel-claude--project-root))))
       (when root
         (ghostel-agent--normalize-root root)))))
 
+(defun ghostel-agent--current-session ()
+  "Return the current ghostel agent session, or nil."
+  (when (derived-mode-p 'ghostel-mode)
+    (or (when-let* ((id (bound-and-true-p ghostel-agent--session-id))
+                    (session (ghostel-agent--live-session-by-id id)))
+          session)
+        (ghostel-agent--session-for-buffer (current-buffer)))))
+
+(defun ghostel-agent--sessions-for-root (root &optional agent)
+  "Return live sessions for ROOT.
+When AGENT is non-nil, restrict the result to that agent."
+  (let ((root (ghostel-agent--normalize-root root)))
+    (ghostel-agent--cleanup-sessions)
+    (seq-filter (lambda (session)
+                  (and (equal root (plist-get session :root))
+                       (or (null agent)
+                           (eq agent (plist-get session :agent)))))
+                (mapcar #'cdr ghostel-agent--sessions))))
+
+(defun ghostel-agent--last (items)
+  "Return the last element of ITEMS."
+  (car (last items)))
+
+(defun ghostel-agent--selected-session (root)
+  "Return the selected live session for ROOT, or nil."
+  (when-let* ((id (alist-get (ghostel-agent--normalize-root root)
+                             ghostel-agent--selected-session-alist
+                             nil nil #'equal)))
+    (ghostel-agent--live-session-by-id id)))
+
 (defun ghostel-agent--selected-agent (root)
   "Return the selected agent for ROOT, or nil."
-  (let ((agent (alist-get (ghostel-agent--normalize-root root)
-                          ghostel-agent--selected-agent-alist nil nil #'equal)))
-    (when (assq agent ghostel-agent-profiles)
-      agent)))
+  (when-let* ((session (ghostel-agent--selected-session root)))
+    (plist-get session :agent)))
 
 (defun ghostel-agent--select-agent (root agent)
-  "Mark AGENT as the selected agent for ROOT."
-  (setf (alist-get (ghostel-agent--normalize-root root)
-                   ghostel-agent--selected-agent-alist nil nil #'equal)
-        agent))
+  "Mark AGENT's latest session as selected for ROOT."
+  (when-let* ((session (ghostel-agent--last-session-for-agent agent root)))
+    (ghostel-agent--select-session session)))
 
 (defun ghostel-agent--project-root ()
   "Return the project root, or `default-directory' as fallback."
@@ -104,84 +221,115 @@
             (ignore-errors (projectile-project-root)))
        default-directory)))
 
-(defun ghostel-agent--buffer-matches-p (buf agent root)
-  "Return non-nil when BUF is the live AGENT buffer for ROOT."
-  (and (buffer-live-p buf)
-       (let ((root (ghostel-agent--normalize-root root))
-             (identity (ghostel-agent--buffer-name agent root)))
-         (with-current-buffer buf
-           (and (derived-mode-p 'ghostel-mode)
-                (eq ghostel-agent--agent agent)
-                (equal ghostel-agent--project-root root)
-                (equal (bound-and-true-p ghostel--buffer-identity)
-                       identity))))))
+(defun ghostel-agent--next-label (agent root)
+  "Return the display label for a new AGENT session in ROOT."
+  (let* ((base (ghostel-agent--agent-name agent))
+         (count (1+ (length (ghostel-agent--sessions-for-root root agent)))))
+    (if (= count 1)
+        base
+      (format "%s %d" base count))))
 
-(defun ghostel-agent--find-buffer (agent root)
-  "Find a live Ghostel AGENT buffer for ROOT by its project identity."
-  (let ((identity (ghostel-agent--buffer-name agent root)))
-    (cl-find-if
-     (lambda (buf)
-       (with-current-buffer buf
-         (and (derived-mode-p 'ghostel-mode)
-              (equal (bound-and-true-p ghostel--buffer-identity)
-                     identity))))
-     (buffer-list))))
+(defun ghostel-agent--install-buffer-locals (session)
+  "Install ghostel agent buffer-local state for SESSION."
+  (when-let* ((buf (ghostel-agent--session-buffer session)))
+    (with-current-buffer buf
+      (setq ghostel-agent--session-id (plist-get session :id)
+            ghostel-agent--agent (plist-get session :agent)
+            ghostel-agent--project-root (plist-get session :root))
+      (ghostel-agent-session-mode 1)
+      (setq-local tab-line-format '(:eval (ghostel-agent--tab-line))))))
+
+(defun ghostel-agent--register-session (agent root buf &optional resume label)
+  "Register BUF as an AGENT session in ROOT.
+When RESUME is non-nil, the session was started in resume mode.
+LABEL, when non-nil, overrides the generated tab label."
+  (let* ((root (ghostel-agent--normalize-root root))
+         (id (ghostel-agent--next-session-id))
+         (session (list :id id
+                        :agent agent
+                        :root root
+                        :buffer buf
+                        :resume resume
+                        :label (or label (ghostel-agent--next-label agent root))
+                        :created-at (float-time)
+                        :last-selected nil)))
+    (setq ghostel-agent--sessions
+          (append ghostel-agent--sessions (list (cons id session))))
+    (ghostel-agent--install-buffer-locals session)
+    session))
+
+(defun ghostel-agent--refresh-tab-lines (&optional root)
+  "Refresh tab lines for ghostel agent sessions.
+When ROOT is non-nil, refresh only sessions in that project."
+  (let ((root (and root (ghostel-agent--normalize-root root))))
+    (ghostel-agent--cleanup-sessions)
+    (dolist (session (mapcar #'cdr ghostel-agent--sessions))
+      (when (or (null root)
+                (equal root (plist-get session :root)))
+        (ghostel-agent--install-buffer-locals session)))
+    (force-mode-line-update t)))
+
+(defun ghostel-agent--select-session (session)
+  "Mark SESSION as the selected session for its project."
+  (when (ghostel-agent--session-live-p session)
+    (let ((id (plist-get session :id))
+          (agent (plist-get session :agent))
+          (root (ghostel-agent--normalize-root (plist-get session :root))))
+      (plist-put session :root root)
+      (setf (alist-get root ghostel-agent--selected-session-alist
+                       nil nil #'equal)
+            id)
+      (setf (alist-get (ghostel-agent--key agent root)
+                       ghostel-agent--last-session-alist nil nil #'equal)
+            id)
+      (plist-put session :last-selected (float-time))
+      (ghostel-agent--install-buffer-locals session)
+      (ghostel-agent--refresh-tab-lines root)
+      session)))
+
+(defun ghostel-agent--last-session-for-agent (agent root)
+  "Return AGENT's latest selected live session in ROOT, or nil."
+  (or (when-let* ((id (alist-get (ghostel-agent--key agent root)
+                                 ghostel-agent--last-session-alist
+                                 nil nil #'equal)))
+        (ghostel-agent--live-session-by-id id))
+      (ghostel-agent--last (ghostel-agent--sessions-for-root root agent))))
 
 (defun ghostel-agent--get-buffer (agent root)
-  "Return the live ghostel AGENT buffer for ROOT, or nil."
-  (let* ((root (ghostel-agent--normalize-root root))
-         (key (ghostel-agent--key agent root))
-         (buf (alist-get key ghostel-agent--buffer-alist nil nil #'equal)))
-    (unless (ghostel-agent--buffer-matches-p buf agent root)
-      (setf (alist-get key ghostel-agent--buffer-alist nil 'remove #'equal) nil)
-      (setq buf nil))
-    (or buf
-        (let ((found (ghostel-agent--find-buffer agent root)))
-          (when found
-            (with-current-buffer found
-              (setq ghostel-agent--agent agent
-                    ghostel-agent--project-root root))
-            (setf (alist-get key ghostel-agent--buffer-alist nil nil #'equal)
-                  found)
-            found)))))
+  "Return AGENT's latest live ghostel buffer for ROOT, or nil."
+  (when-let* ((session (ghostel-agent--last-session-for-agent agent root)))
+    (ghostel-agent--session-buffer session)))
 
 (defun ghostel-agent--get-window (agent root)
-  "Return the window displaying the ghostel AGENT buffer for ROOT, or nil."
-  (let ((buf (ghostel-agent--get-buffer agent root)))
-    (when buf (get-buffer-window buf t))))
+  "Return a window displaying AGENT's latest buffer for ROOT, or nil."
+  (when-let* ((buf (ghostel-agent--get-buffer agent root)))
+    (get-buffer-window buf t)))
 
 (defun ghostel-agent--agents-for-root (root)
   "Return agents with live buffers for ROOT."
-  (delq nil
-        (mapcar (lambda (profile)
-                  (let ((agent (car profile)))
-                    (when (ghostel-agent--get-buffer agent root)
-                      agent)))
-                ghostel-agent-profiles)))
+  (delete-dups (mapcar (lambda (session)
+                         (plist-get session :agent))
+                       (ghostel-agent--sessions-for-root root))))
 
 (defun ghostel-agent--default-agent (root)
   "Return the default agent for ROOT."
-  (let ((root (ghostel-agent--normalize-root root)))
-    (or (ghostel-agent--selected-agent root)
-        (ghostel-agent--current-agent)
-        (let ((agents (ghostel-agent--agents-for-root root)))
-          (when (and agents (null (cdr agents)))
-            (car agents)))
-        'claude)))
+  (or (when-let* ((session (ghostel-agent--default-session root)))
+        (plist-get session :agent))
+      'claude))
 
-(defun ghostel-agent--prune-buffer-alist ()
-  "Drop stale agent buffer entries from `ghostel-agent--buffer-alist'."
-  (setq ghostel-agent--buffer-alist
-        (delq nil
-              (mapcar
-               (lambda (entry)
-                 (let ((key (car entry))
-                       (buf (cdr entry)))
-                   (when (and (consp key)
-                              (ghostel-agent--buffer-matches-p
-                               buf (car key) (cdr key)))
-                     (cons (ghostel-agent--key (car key) (cdr key)) buf))))
-               ghostel-agent--buffer-alist))))
+(defun ghostel-agent--default-session (root)
+  "Return the default session for a plain `s-l' in ROOT, or nil."
+  (let ((root (ghostel-agent--normalize-root root)))
+    (or (ghostel-agent--selected-session root)
+        (let ((current (ghostel-agent--current-session)))
+          (when (and current
+                     (equal root (plist-get current :root)))
+            current))
+        (let ((sessions (ghostel-agent--sessions-for-root root)))
+          (cond
+           ((null sessions) nil)
+           ((null (cdr sessions)) (car sessions))
+           (t (ghostel-agent--last sessions)))))))
 
 (defun ghostel-agent--command-line (profile resume)
   "Return the shell command for PROFILE.
@@ -200,13 +348,35 @@ When RESUME is non-nil, include the profile's resume arguments."
     (with-current-buffer buf
       (process-send-string ghostel--process (concat command "\n")))))
 
+(defun ghostel-agent--sidebar-window-p (win)
+  "Return non-nil when WIN is the ghostel agent side window."
+  (and (window-live-p win)
+       (eq (window-parameter win 'window-side) ghostel-agent-side)
+       (eql (window-parameter win 'window-slot) 0)))
+
+(defun ghostel-agent--sidebar-window ()
+  "Return the ghostel agent side window for the selected frame, or nil."
+  (seq-find #'ghostel-agent--sidebar-window-p
+            (window-list (selected-frame) 'no-minibuf)))
+
+(defun ghostel-agent--remember-last-window ()
+  "Remember the current non-sidebar window."
+  (unless (ghostel-agent--sidebar-window-p (selected-window))
+    (setq ghostel-agent--last-window (selected-window))))
+
 (defun ghostel-agent--display-sidebar-window (buf)
   "Display BUF in a side window and return that window."
-  (display-buffer-in-side-window
-   buf `((side . ,ghostel-agent-side)
-         (slot . 0)
-         (window-width . ,ghostel-agent-width)
-         (window-parameters . ((no-delete-other-windows . t))))))
+  (let ((win (ghostel-agent--sidebar-window)))
+    (if (window-live-p win)
+        (progn
+          (set-window-dedicated-p win nil)
+          (set-window-buffer win buf)
+          win)
+      (display-buffer-in-side-window
+       buf `((side . ,ghostel-agent-side)
+             (slot . 0)
+             (window-width . ,ghostel-agent-width)
+             (window-parameters . ((no-delete-other-windows . t))))))))
 
 (defun ghostel-agent--finish-sidebar-window (win)
   "Apply sidebar window settings to WIN."
@@ -222,22 +392,31 @@ When RESUME is non-nil, use the agent profile's resume arguments."
          (profile (ghostel-agent--profile agent))
          (default-directory root)
          (command (ghostel-agent--command-line profile resume))
-         (identity (ghostel-agent--buffer-name agent root))
-         (buf (get-buffer-create identity)))
+         (buf (generate-new-buffer (plist-get profile :buffer-name)))
+         (session (ghostel-agent--register-session agent root buf resume))
+         (identity (ghostel-agent--buffer-name
+                    agent root (plist-get session :id)))
+         (setup-locals (lambda ()
+                         (when (eq (current-buffer) buf)
+                           (ghostel-agent--install-buffer-locals session)))))
     (with-current-buffer buf
-      (setq default-directory root))
+      (setq default-directory root)
+      (rename-buffer identity t))
+    (ghostel-agent--select-session session)
     (let ((win (ghostel-agent--display-sidebar-window buf)))
       (select-window win)
-      (let ((ghostel-buffer-name identity))
-        (setq buf (ghostel nil)))
+      (unwind-protect
+          (progn
+            (add-hook 'ghostel-mode-hook setup-locals)
+            (let ((ghostel-buffer-name identity))
+              (setq buf (ghostel nil))))
+        (remove-hook 'ghostel-mode-hook setup-locals))
+      (plist-put session :buffer buf)
       (ghostel-agent--finish-sidebar-window win)
-      (with-current-buffer buf
-        (setq ghostel-agent--agent agent
-              ghostel-agent--project-root root))
+      (ghostel-agent--install-buffer-locals session)
       (run-at-time ghostel-agent-command-delay nil
                    #'ghostel-agent--send-command buf command)
-      (setf (alist-get (ghostel-agent--key agent root)
-                       ghostel-agent--buffer-alist nil nil #'equal) buf)
+      (ghostel-agent--refresh-tab-lines root)
       win)))
 
 (defun ghostel-agent--show-sidebar (buf)
@@ -245,6 +424,63 @@ When RESUME is non-nil, use the agent profile's resume arguments."
   (let ((win (ghostel-agent--display-sidebar-window buf)))
     (ghostel-agent--finish-sidebar-window win)
     win))
+
+(defun ghostel-agent--show-session (session)
+  "Display SESSION in the ghostel side window and return that window."
+  (unless (ghostel-agent--session-live-p session)
+    (user-error "Ghostel agent session is no longer live"))
+  (ghostel-agent--select-session session)
+  (ghostel-agent--show-sidebar (plist-get session :buffer)))
+
+(defun ghostel-agent--show-session-by-id (id)
+  "Display ghostel agent session ID."
+  (interactive)
+  (let ((session (ghostel-agent--live-session-by-id id)))
+    (unless session
+      (user-error "Ghostel agent session is no longer live"))
+    (ghostel-agent--remember-last-window)
+    (select-window (ghostel-agent--show-session session))))
+
+(defun ghostel-agent--tab-line-tab (session selected-id)
+  "Return a tab-line button for SESSION.
+SELECTED-ID is the selected session id for the current root."
+  (let* ((id (plist-get session :id))
+         (label (plist-get session :label))
+         (selected (equal id selected-id))
+         (map (make-sparse-keymap))
+         (text (if selected
+                   (format " [%s] " label)
+                 (format "  %s  " label))))
+    (define-key map [tab-line mouse-1]
+                (lambda ()
+                  (interactive)
+                  (ghostel-agent--show-session-by-id id)))
+    (define-key map [mouse-1]
+                (lambda ()
+                  (interactive)
+                  (ghostel-agent--show-session-by-id id)))
+    (propertize text
+                'face (if selected
+                          'ghostel-agent-tab-current
+                        'ghostel-agent-tab)
+                'mouse-face 'tab-line-highlight
+                'local-map map
+                'help-echo "mouse-1: switch ghostel agent session")))
+
+(defun ghostel-agent--tab-line ()
+  "Return the ghostel agent tab line for the current buffer."
+  (let* ((root (ghostel-agent--current-root))
+         (sessions (and root (ghostel-agent--sessions-for-root root)))
+         (selected (and root (ghostel-agent--selected-session root)))
+         (current (ghostel-agent--current-session))
+         (selected-id (or (plist-get current :id)
+                          (plist-get selected :id))))
+    (when (> (length sessions) 1)
+      (apply #'concat
+             " "
+             (mapcar (lambda (session)
+                       (ghostel-agent--tab-line-tab session selected-id))
+                     sessions)))))
 
 (defun ghostel-agent--send-region (buf)
   "Send the active region with file context to the ghostel agent BUF."
@@ -262,85 +498,181 @@ When RESUME is non-nil, use the agent profile's resume arguments."
     (with-current-buffer buf
       (ghostel-paste-string formatted))))
 
-(defun ghostel-agent-toggle (agent resume &optional force-show root)
-  "Smart toggle for AGENT's ghostel sidebar.
-When RESUME is non-nil, create the buffer with the resume command.
-When FORCE-SHOW is non-nil, focus the sidebar instead of hiding it.
+(defun ghostel-agent-toggle-session (session)
+  "Smart toggle for SESSION's ghostel sidebar.
 1. Not visible → show (create if needed).
 2. Visible + focused → hide.
 3. Visible + not focused + region → send region & focus.
 4. Visible + not focused → focus."
-  ;; When inside a sidebar buffer, use its stored root to avoid cwd drift.
-  (let* ((root (or root
-                   (ghostel-agent--current-root)
-                   (ghostel-agent--project-root)))
-         (root (ghostel-agent--normalize-root root))
-         (buf (ghostel-agent--get-buffer agent root))
-         (win (ghostel-agent--get-window agent root))
+  (let* ((buf (ghostel-agent--session-buffer session))
+         (win (and buf (get-buffer-window buf t)))
          (in-sidebar (and buf (eq (current-buffer) buf))))
-    (ghostel-agent--select-agent root agent)
+    (ghostel-agent--select-session session)
     (cond
      ;; Visible + focused → hide
-     ((and win in-sidebar (not force-show))
+     ((and win in-sidebar)
       (when (and ghostel-agent--last-window
                  (window-live-p ghostel-agent--last-window))
         (select-window ghostel-agent--last-window))
       (delete-window win))
-     ;; Visible + focused + explicit selection → keep focus.
-     ((and win in-sidebar force-show)
-      (select-window win))
      ;; Visible + not focused + region → send region & focus
      ((and win (use-region-p))
       (ghostel-agent--send-region buf)
-      (setq ghostel-agent--last-window (selected-window))
+      (ghostel-agent--remember-last-window)
       (select-window win))
      ;; Visible + not focused → focus
      (win
-      (setq ghostel-agent--last-window (selected-window))
+      (ghostel-agent--remember-last-window)
       (select-window win))
      ;; Buffer exists but not visible → show
      (buf
-      (setq ghostel-agent--last-window (selected-window))
+      (ghostel-agent--remember-last-window)
       (select-window (ghostel-agent--show-sidebar buf)))
-     ;; No buffer → create + show
      (t
-      (setq ghostel-agent--last-window (selected-window))
-      (select-window (ghostel-agent--create agent root resume))))))
+      (user-error "Ghostel agent session is no longer live")))))
+
+(defun ghostel-agent-toggle (agent resume &optional _force-show root)
+  "Compatibility wrapper for toggling AGENT in ROOT.
+When no AGENT session exists, create one.  RESUME controls only creation."
+  (let* ((root (or root
+                   (ghostel-agent--current-root)
+                   (ghostel-agent--project-root)))
+         (root (ghostel-agent--normalize-root root))
+         (session (ghostel-agent--last-session-for-agent agent root)))
+    (if session
+        (ghostel-agent-toggle-session session)
+      (ghostel-agent--remember-last-window)
+      (select-window (ghostel-agent--create agent root resume)))))
 
 (defun ghostel-agent--parse-prefix (arg)
-  "Return (AGENT RESUME EXPLICIT) for raw prefix ARG.
-Plain `s-l' toggles the selected agent for this project.
-`C-u s-l' selects Claude and starts it with `--resume'.
-`C-2 s-l' selects Codex.
-`C-3 s-l' selects Codex and starts it with `resume'."
+  "Return (AGENT RESUME) for raw prefix ARG.
+Plain commands target the selected session for this project.
+`C-u' targets Claude, creating with `--resume' when needed.
+`C-2' targets Codex.
+`C-3' targets Codex, creating with `resume' when needed."
   (cond
-   ((null arg) '(nil nil nil))
-   ((equal arg '(4)) '(claude t t))
-   ((equal arg 2) '(codex nil t))
-   ((equal arg 3) '(codex t t))
+   ((null arg) '(nil nil))
+   ((equal arg '(4)) '(claude t))
+   ((equal arg 2) '(codex nil))
+   ((equal arg 3) '(codex t))
    (t (user-error "Unknown ghostel agent prefix: %S" arg))))
 
 (defun ghostel-agent-toggle-command (arg)
   "Toggle a ghostel agent sidebar based on prefix ARG.
-Plain `s-l' toggles the selected agent for this project, `C-u s-l'
-selects and resumes Claude, `C-2 s-l' selects Codex, and `C-3 s-l'
-selects and resumes Codex."
+Plain `s-l' toggles the selected session for this project.
+`C-u s-l' toggles the latest Claude session, creating a resume
+session if none exists.  `C-2 s-l' toggles the latest Codex session,
+and `C-3 s-l' creates a Codex resume session only when no Codex
+session exists yet."
   (interactive "P")
   (let* ((parsed (ghostel-agent--parse-prefix arg))
          (agent (car parsed))
          (resume (cadr parsed))
-         (explicit (caddr parsed))
+         (root (or (ghostel-agent--current-root)
+                   (ghostel-agent--project-root)))
+         (root (ghostel-agent--normalize-root root))
+         (session (if agent
+                      (ghostel-agent--last-session-for-agent agent root)
+                    (ghostel-agent--default-session root))))
+    (if session
+        (ghostel-agent-toggle-session session)
+      (ghostel-agent--remember-last-window)
+      (select-window (ghostel-agent--create (or agent 'claude)
+                                            root resume)))))
+
+(defun ghostel-agent-new-session-command (arg)
+  "Create and show a new ghostel agent session based on prefix ARG.
+Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
+`C-2 s-t' creates Codex, and `C-3 s-t' creates Codex resume."
+  (interactive "P")
+  (let* ((parsed (ghostel-agent--parse-prefix arg))
+         (agent (or (car parsed) 'claude))
+         (resume (cadr parsed))
          (root (or (ghostel-agent--current-root)
                    (ghostel-agent--project-root)))
          (root (ghostel-agent--normalize-root root)))
-    (unless agent
-      (setq agent (ghostel-agent--default-agent root)))
-    (ghostel-agent-toggle agent resume explicit root)))
+    (ghostel-agent--remember-last-window)
+    (select-window (ghostel-agent--create agent root resume))))
+
+(defun ghostel-agent-cycle-session (delta)
+  "Cycle the selected ghostel agent session by DELTA."
+  (let* ((root (or (ghostel-agent--current-root)
+                   (ghostel-agent--project-root)))
+         (root (ghostel-agent--normalize-root root))
+         (sessions (ghostel-agent--sessions-for-root root))
+         (selected (or (ghostel-agent--selected-session root)
+                       (ghostel-agent--current-session)
+                       (car sessions))))
+    (unless sessions
+      (user-error "No ghostel agent sessions for this project"))
+    (let* ((len (length sessions))
+           (index (or (cl-position (plist-get selected :id)
+                                   sessions
+                                   :key (lambda (session)
+                                          (plist-get session :id))
+                                   :test #'equal)
+                      0))
+           (next (nth (mod (+ index delta) len) sessions)))
+      (ghostel-agent--remember-last-window)
+      (select-window (ghostel-agent--show-session next)))))
+
+(defun ghostel-agent-next-session ()
+  "Switch to the next ghostel agent session for this project."
+  (interactive)
+  (ghostel-agent-cycle-session 1))
+
+(defun ghostel-agent-previous-session ()
+  "Switch to the previous ghostel agent session for this project."
+  (interactive)
+  (ghostel-agent-cycle-session -1))
 
 (defun ghostel-claude-toggle (arg)
   "Backward-compatible wrapper for `ghostel-agent-toggle-command'."
   (interactive "P")
   (ghostel-agent-toggle-command arg))
+
+(defun ghostel-agent--migrate-legacy-session (agent root buf)
+  "Register legacy AGENT ROOT BUF state as a session."
+  (let ((root (ghostel-agent--normalize-root root)))
+    (when (and (buffer-live-p buf)
+               (null (ghostel-agent--session-for-buffer buf)))
+      (with-current-buffer buf
+        (let ((buffer-agent (bound-and-true-p ghostel-agent--agent))
+              (buffer-root (or (bound-and-true-p ghostel-agent--project-root)
+                               (bound-and-true-p ghostel-claude--project-root))))
+          (when (and (derived-mode-p 'ghostel-mode)
+                     (or (null buffer-agent)
+                         (eq buffer-agent agent))
+                     (or (null buffer-root)
+                         (equal (ghostel-agent--normalize-root buffer-root)
+                                root))
+                     (equal (ghostel-agent--normalize-root default-directory)
+                            root))
+            (ghostel-agent--register-session agent root buf nil)))))))
+
+(defun ghostel-agent--migrate-legacy-state ()
+  "Migrate live buffers from older ghostel agent config versions."
+  (when (boundp 'ghostel-agent--buffer-alist)
+    (dolist (entry (symbol-value 'ghostel-agent--buffer-alist))
+      (let ((key (car entry))
+            (buf (cdr entry)))
+        (when (consp key)
+          (ghostel-agent--migrate-legacy-session (car key) (cdr key) buf)))))
+  (when (boundp 'ghostel-claude--buffer-alist)
+    (dolist (entry (symbol-value 'ghostel-claude--buffer-alist))
+      (ghostel-agent--migrate-legacy-session 'claude (car entry) (cdr entry))))
+  (when (boundp 'ghostel-agent--selected-agent-alist)
+    (dolist (entry (symbol-value 'ghostel-agent--selected-agent-alist))
+      (let ((root (car entry))
+            (agent (cdr entry)))
+        (when-let* ((session (ghostel-agent--last-session-for-agent agent root)))
+          (ghostel-agent--select-session session)))))
+  (dolist (session (mapcar #'cdr ghostel-agent--sessions))
+    (let ((root (plist-get session :root)))
+      (unless (ghostel-agent--selected-session root)
+        (ghostel-agent--select-session session)))))
+
+(ghostel-agent--migrate-legacy-state)
 
 ;; Replace ⏺ (U+23FA) with ● (U+25CF) in ghostel output before rendering,
 ;; because STIX Two Math renders ⏺ with broken descent metrics.
@@ -384,8 +716,7 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
 
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
 
-(ghostel-agent--prune-buffer-alist)
-
 (global-set-key (kbd "s-l") #'ghostel-agent-toggle-command)
+(global-set-key (kbd "s-t") #'ghostel-agent-new-session-command)
 
 ;;; ghostel.el ends here

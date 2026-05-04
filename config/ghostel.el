@@ -441,6 +441,49 @@ When RESUME is non-nil, use the agent profile's resume arguments."
     (ghostel-agent--remember-last-window)
     (select-window (ghostel-agent--show-session session))))
 
+(defun ghostel-agent--previous-session (session)
+  "Return the live session before SESSION in the same project, or nil."
+  (let* ((root (plist-get session :root))
+         (id (plist-get session :id))
+         (sessions (ghostel-agent--sessions-for-root root))
+         (others (seq-remove (lambda (candidate)
+                               (equal id (plist-get candidate :id)))
+                             sessions))
+         (index (cl-position id sessions
+                             :key (lambda (candidate)
+                                    (plist-get candidate :id))
+                             :test #'equal)))
+    (when others
+      (if (and index (> index 0))
+          (nth (1- index) sessions)
+        (ghostel-agent--last others)))))
+
+(defun ghostel-agent--show-session-in-window (session win)
+  "Show SESSION in WIN and return WIN."
+  (unless (ghostel-agent--session-live-p session)
+    (user-error "Ghostel agent session is no longer live"))
+  (ghostel-agent--select-session session)
+  (if (window-live-p win)
+      (let ((buf (ghostel-agent--session-buffer session)))
+        (set-window-dedicated-p win nil)
+        (set-window-buffer win buf)
+        (ghostel-agent--finish-sidebar-window win))
+    (ghostel-agent--show-session session)))
+
+(defun ghostel-agent--after-exit (buf _event)
+  "Keep the sidebar open on BUF exit when another session is live."
+  (when-let* ((session (ghostel-agent--session-for-buffer buf)))
+    (let ((root (plist-get session :root))
+          (win (get-buffer-window buf t))
+          (next (ghostel-agent--previous-session session)))
+      (when next
+        (ghostel-agent--show-session-in-window next win))
+      (run-at-time 0 nil
+                   (lambda (root)
+                     (ghostel-agent--cleanup-sessions)
+                     (ghostel-agent--refresh-tab-lines root))
+                   root))))
+
 (defun ghostel-agent--tab-line-tab (session selected-id)
   "Return a tab-line button for SESSION.
 SELECTED-ID is the selected session id for the current root."
@@ -631,48 +674,7 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
   (interactive "P")
   (ghostel-agent-toggle-command arg))
 
-(defun ghostel-agent--migrate-legacy-session (agent root buf)
-  "Register legacy AGENT ROOT BUF state as a session."
-  (let ((root (ghostel-agent--normalize-root root)))
-    (when (and (buffer-live-p buf)
-               (null (ghostel-agent--session-for-buffer buf)))
-      (with-current-buffer buf
-        (let ((buffer-agent (bound-and-true-p ghostel-agent--agent))
-              (buffer-root (or (bound-and-true-p ghostel-agent--project-root)
-                               (bound-and-true-p ghostel-claude--project-root))))
-          (when (and (derived-mode-p 'ghostel-mode)
-                     (or (null buffer-agent)
-                         (eq buffer-agent agent))
-                     (or (null buffer-root)
-                         (equal (ghostel-agent--normalize-root buffer-root)
-                                root))
-                     (equal (ghostel-agent--normalize-root default-directory)
-                            root))
-            (ghostel-agent--register-session agent root buf nil)))))))
-
-(defun ghostel-agent--migrate-legacy-state ()
-  "Migrate live buffers from older ghostel agent config versions."
-  (when (boundp 'ghostel-agent--buffer-alist)
-    (dolist (entry (symbol-value 'ghostel-agent--buffer-alist))
-      (let ((key (car entry))
-            (buf (cdr entry)))
-        (when (consp key)
-          (ghostel-agent--migrate-legacy-session (car key) (cdr key) buf)))))
-  (when (boundp 'ghostel-claude--buffer-alist)
-    (dolist (entry (symbol-value 'ghostel-claude--buffer-alist))
-      (ghostel-agent--migrate-legacy-session 'claude (car entry) (cdr entry))))
-  (when (boundp 'ghostel-agent--selected-agent-alist)
-    (dolist (entry (symbol-value 'ghostel-agent--selected-agent-alist))
-      (let ((root (car entry))
-            (agent (cdr entry)))
-        (when-let* ((session (ghostel-agent--last-session-for-agent agent root)))
-          (ghostel-agent--select-session session)))))
-  (dolist (session (mapcar #'cdr ghostel-agent--sessions))
-    (let ((root (plist-get session :root)))
-      (unless (ghostel-agent--selected-session root)
-        (ghostel-agent--select-session session)))))
-
-(ghostel-agent--migrate-legacy-state)
+(add-hook 'ghostel-exit-functions #'ghostel-agent--after-exit)
 
 ;; Replace ⏺ (U+23FA) with ● (U+25CF) in ghostel output before rendering,
 ;; because STIX Two Math renders ⏺ with broken descent metrics.

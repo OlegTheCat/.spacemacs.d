@@ -51,12 +51,17 @@
   "Seconds to wait before sending the agent command to a new shell.")
 
 (defface ghostel-agent-tab-current
-  '((t :inherit tab-line-tab-current :weight bold :underline t))
+  '((t :inherit tab-line-tab-current :weight bold :underline nil))
   "Face for the selected ghostel agent session tab.")
 
 (defface ghostel-agent-tab
   '((t :inherit tab-line-tab))
   "Face for inactive ghostel agent session tabs.")
+
+(set-face-attribute 'ghostel-agent-tab-current nil
+                    :inherit 'tab-line-tab-current
+                    :weight 'bold
+                    :underline nil)
 
 (defvar ghostel-agent-session-mode-map
   (let ((map (make-sparse-keymap)))

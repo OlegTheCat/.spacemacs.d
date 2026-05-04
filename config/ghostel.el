@@ -3,8 +3,6 @@
 (require 'ghostel)
 (require 'flash)
 
-(setq ghostel-copy-mode-auto-load-scrollback t)
-
 ;; Replace ⏺ (U+23FA) with ● (U+25CF) in ghostel output before rendering,
 ;; because STIX Two Math renders ⏺ with broken descent metrics.
 (defun my/ghostel-replace-bullet (orig-fun process output)

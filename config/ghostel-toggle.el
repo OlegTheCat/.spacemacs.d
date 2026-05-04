@@ -29,12 +29,17 @@
   "Height of the terminal drawer as a fraction of the frame.")
 
 (defface ghostel-toggle-tab-current
-  '((t :inherit tab-line-tab-current :weight bold :underline t))
+  '((t :inherit tab-line-tab-current :weight bold :underline nil))
   "Face for the selected Ghostel terminal tab.")
 
 (defface ghostel-toggle-tab
   '((t :inherit tab-line-tab))
   "Face for inactive Ghostel terminal tabs.")
+
+(set-face-attribute 'ghostel-toggle-tab-current nil
+                    :inherit 'tab-line-tab-current
+                    :weight 'bold
+                    :underline nil)
 
 (defvar ghostel-toggle-session-mode-map
   (let ((map (make-sparse-keymap)))

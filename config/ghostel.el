@@ -1,6 +1,7 @@
 ;;; ghostel.el --- Generic Ghostel tweaks -*- lexical-binding: t -*-
 
 (require 'ghostel)
+(require 'flash)
 
 (setq ghostel-copy-mode-auto-load-scrollback t)
 
@@ -27,6 +28,16 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
   (ghostel-copy-mode)
   (adaptive-scroll-up))
 (define-key ghostel-mode-map (kbd "M-v") #'ghostel-enter-copy-mode-and-scroll-up)
+
+(defun ghostel-copy-mode-flash-jump ()
+  "Enter Ghostel copy mode if needed, then start `flash-jump'."
+  (interactive)
+  (unless (bound-and-true-p ghostel--copy-mode-active)
+    (ghostel-copy-mode))
+  (call-interactively #'flash-jump))
+
+(define-key ghostel-mode-map (kbd "s-j") #'ghostel-copy-mode-flash-jump)
+(define-key ghostel-copy-mode-map (kbd "s-j") #'ghostel-copy-mode-flash-jump)
 
 ;; M-> in copy mode exits back to the live terminal.
 (define-key ghostel-copy-mode-map (kbd "M->") #'ghostel-copy-mode-exit)

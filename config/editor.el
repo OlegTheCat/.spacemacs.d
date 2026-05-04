@@ -68,6 +68,8 @@
 (global-set-key (kbd "C-s") 'helm-occur)
 
 ;; Use Menlo for vterm/Claude Code buffers.
+(setq vterm-max-scrollback 100000)
+
 (add-hook 'vterm-mode-hook
           (lambda ()
             (face-remap-add-relative 'default :family "Menlo")))

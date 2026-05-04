@@ -606,7 +606,7 @@ before packages are loaded."
   (let ((config-dir (expand-file-name "config/" (file-name-directory dotspacemacs-filepath))))
     (dolist (f '("editor"
                  "adaptive-scroll"
-                 "vterm-toggle"
+                 "ghostel-toggle"
                  "agent-shell-config"
                  "quick-diff"
                  "ghostel"

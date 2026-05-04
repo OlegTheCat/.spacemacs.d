@@ -1,6 +1,7 @@
 ;;; ghostel.el --- Ghostel agent sidebars -*- lexical-binding: t -*-
 
 (require 'ghostel)
+(require 'cl-lib)
 
 (setq ghostel-copy-mode-auto-load-scrollback t)
 
@@ -52,7 +53,22 @@
 
 (defun ghostel-agent--key (agent root)
   "Return the buffer registry key for AGENT in ROOT."
-  (cons agent root))
+  (cons agent (ghostel-agent--normalize-root root)))
+
+(defun ghostel-agent--normalize-root (root)
+  "Return ROOT as a canonical project directory string."
+  (file-name-as-directory (expand-file-name root)))
+
+(defun ghostel-agent--buffer-name (agent root)
+  "Return the project-specific Ghostel buffer identity for AGENT in ROOT."
+  ;; Ghostel reuses buffers by `ghostel--buffer-identity', even after
+  ;; title tracking renames the visible buffer.
+  (let* ((root (ghostel-agent--normalize-root root))
+         (dir (directory-file-name root))
+         (project-name (file-name-nondirectory dir))
+         (project-label (if (string= project-name "") "root" project-name))
+         (root-hash (substring (secure-hash 'sha1 root) 0 8)))
+    (format "*ghostel-%s:%s:%s*" agent project-label root-hash)))
 
 (defun ghostel-agent--current-agent ()
   "Return the agent for the current ghostel buffer, or nil."
@@ -63,31 +79,71 @@
 (defun ghostel-agent--current-root ()
   "Return the project root for the current ghostel agent buffer, or nil."
   (when (derived-mode-p 'ghostel-mode)
-    (or (bound-and-true-p ghostel-agent--project-root)
-        (bound-and-true-p ghostel-claude--project-root))))
+    (let ((root (or (bound-and-true-p ghostel-agent--project-root)
+                    (bound-and-true-p ghostel-claude--project-root))))
+      (when root
+        (ghostel-agent--normalize-root root)))))
 
 (defun ghostel-agent--selected-agent (root)
   "Return the selected agent for ROOT, or nil."
-  (let ((agent (alist-get root ghostel-agent--selected-agent-alist nil nil #'equal)))
+  (let ((agent (alist-get (ghostel-agent--normalize-root root)
+                          ghostel-agent--selected-agent-alist nil nil #'equal)))
     (when (assq agent ghostel-agent-profiles)
       agent)))
 
 (defun ghostel-agent--select-agent (root agent)
   "Mark AGENT as the selected agent for ROOT."
-  (setf (alist-get root ghostel-agent--selected-agent-alist nil nil #'equal) agent))
+  (setf (alist-get (ghostel-agent--normalize-root root)
+                   ghostel-agent--selected-agent-alist nil nil #'equal)
+        agent))
 
 (defun ghostel-agent--project-root ()
   "Return the project root, or `default-directory' as fallback."
-  (or (and (fboundp 'projectile-project-root)
-           (ignore-errors (projectile-project-root)))
-      default-directory))
+  (ghostel-agent--normalize-root
+   (or (and (fboundp 'projectile-project-root)
+            (ignore-errors (projectile-project-root)))
+       default-directory)))
+
+(defun ghostel-agent--buffer-matches-p (buf agent root)
+  "Return non-nil when BUF is the live AGENT buffer for ROOT."
+  (and (buffer-live-p buf)
+       (let ((root (ghostel-agent--normalize-root root))
+             (identity (ghostel-agent--buffer-name agent root)))
+         (with-current-buffer buf
+           (and (derived-mode-p 'ghostel-mode)
+                (eq ghostel-agent--agent agent)
+                (equal ghostel-agent--project-root root)
+                (equal (bound-and-true-p ghostel--buffer-identity)
+                       identity))))))
+
+(defun ghostel-agent--find-buffer (agent root)
+  "Find a live Ghostel AGENT buffer for ROOT by its project identity."
+  (let ((identity (ghostel-agent--buffer-name agent root)))
+    (cl-find-if
+     (lambda (buf)
+       (with-current-buffer buf
+         (and (derived-mode-p 'ghostel-mode)
+              (equal (bound-and-true-p ghostel--buffer-identity)
+                     identity))))
+     (buffer-list))))
 
 (defun ghostel-agent--get-buffer (agent root)
   "Return the live ghostel AGENT buffer for ROOT, or nil."
-  (let ((buf (alist-get (ghostel-agent--key agent root)
-                        ghostel-agent--buffer-alist nil nil #'equal)))
-    (when (and buf (buffer-live-p buf))
-      buf)))
+  (let* ((root (ghostel-agent--normalize-root root))
+         (key (ghostel-agent--key agent root))
+         (buf (alist-get key ghostel-agent--buffer-alist nil nil #'equal)))
+    (unless (ghostel-agent--buffer-matches-p buf agent root)
+      (setf (alist-get key ghostel-agent--buffer-alist nil 'remove #'equal) nil)
+      (setq buf nil))
+    (or buf
+        (let ((found (ghostel-agent--find-buffer agent root)))
+          (when found
+            (with-current-buffer found
+              (setq ghostel-agent--agent agent
+                    ghostel-agent--project-root root))
+            (setf (alist-get key ghostel-agent--buffer-alist nil nil #'equal)
+                  found)
+            found)))))
 
 (defun ghostel-agent--get-window (agent root)
   "Return the window displaying the ghostel AGENT buffer for ROOT, or nil."
@@ -105,12 +161,27 @@
 
 (defun ghostel-agent--default-agent (root)
   "Return the default agent for ROOT."
-  (or (ghostel-agent--selected-agent root)
-      (ghostel-agent--current-agent)
-      (let ((agents (ghostel-agent--agents-for-root root)))
-        (when (and agents (null (cdr agents)))
-          (car agents)))
-      'claude))
+  (let ((root (ghostel-agent--normalize-root root)))
+    (or (ghostel-agent--selected-agent root)
+        (ghostel-agent--current-agent)
+        (let ((agents (ghostel-agent--agents-for-root root)))
+          (when (and agents (null (cdr agents)))
+            (car agents)))
+        'claude)))
+
+(defun ghostel-agent--prune-buffer-alist ()
+  "Drop stale agent buffer entries from `ghostel-agent--buffer-alist'."
+  (setq ghostel-agent--buffer-alist
+        (delq nil
+              (mapcar
+               (lambda (entry)
+                 (let ((key (car entry))
+                       (buf (cdr entry)))
+                   (when (and (consp key)
+                              (ghostel-agent--buffer-matches-p
+                               buf (car key) (cdr key)))
+                     (cons (ghostel-agent--key (car key) (cdr key)) buf))))
+               ghostel-agent--buffer-alist))))
 
 (defun ghostel-agent--command-line (profile resume)
   "Return the shell command for PROFILE.
@@ -147,15 +218,17 @@ When RESUME is non-nil, include the profile's resume arguments."
 (defun ghostel-agent--create (agent root &optional resume)
   "Create a new ghostel terminal running AGENT in ROOT and return its window.
 When RESUME is non-nil, use the agent profile's resume arguments."
-  (let* ((profile (ghostel-agent--profile agent))
+  (let* ((root (ghostel-agent--normalize-root root))
+         (profile (ghostel-agent--profile agent))
          (default-directory root)
          (command (ghostel-agent--command-line profile resume))
-         (buf (generate-new-buffer (plist-get profile :buffer-name))))
+         (identity (ghostel-agent--buffer-name agent root))
+         (buf (get-buffer-create identity)))
     (with-current-buffer buf
       (setq default-directory root))
     (let ((win (ghostel-agent--display-sidebar-window buf)))
       (select-window win)
-      (let ((ghostel-buffer-name (buffer-name buf)))
+      (let ((ghostel-buffer-name identity))
         (setq buf (ghostel nil)))
       (ghostel-agent--finish-sidebar-window win)
       (with-current-buffer buf
@@ -201,6 +274,7 @@ When FORCE-SHOW is non-nil, focus the sidebar instead of hiding it.
   (let* ((root (or root
                    (ghostel-agent--current-root)
                    (ghostel-agent--project-root)))
+         (root (ghostel-agent--normalize-root root))
          (buf (ghostel-agent--get-buffer agent root))
          (win (ghostel-agent--get-window agent root))
          (in-sidebar (and buf (eq (current-buffer) buf))))
@@ -257,7 +331,8 @@ selects and resumes Codex."
          (resume (cadr parsed))
          (explicit (caddr parsed))
          (root (or (ghostel-agent--current-root)
-                   (ghostel-agent--project-root))))
+                   (ghostel-agent--project-root)))
+         (root (ghostel-agent--normalize-root root)))
     (unless agent
       (setq agent (ghostel-agent--default-agent root)))
     (ghostel-agent-toggle agent resume explicit root)))
@@ -308,6 +383,8 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
 (define-key ghostel-copy-mode-map (kbd "C-w") #'ghostel-copy-mode-copy-stay)
 
 (add-to-list 'golden-ratio-exclude-modes "ghostel-mode")
+
+(ghostel-agent--prune-buffer-alist)
 
 (global-set-key (kbd "s-l") #'ghostel-agent-toggle-command)
 

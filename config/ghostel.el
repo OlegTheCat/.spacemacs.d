@@ -42,6 +42,9 @@
 (defvar ghostel-agent-width 0.55
   "Width of the sidebar as a fraction of the frame.")
 
+(defvar ghostel-agent-command-delay 0.3
+  "Seconds to wait before sending the agent command to a new shell.")
+
 (defun ghostel-agent--profile (agent)
   "Return the profile plist for AGENT."
   (or (cdr (assq agent ghostel-agent-profiles))
@@ -109,20 +112,38 @@
           (car agents)))
       'claude))
 
+(defun ghostel-agent--command-line (profile resume)
+  "Return the shell command for PROFILE.
+When RESUME is non-nil, include the profile's resume arguments."
+  (mapconcat #'shell-quote-argument
+             (cons (plist-get profile :program)
+                   (if resume
+                       (plist-get profile :resume-args)
+                     (plist-get profile :args)))
+             " "))
+
+(defun ghostel-agent--send-command (buf command)
+  "Send COMMAND to the shell running in BUF."
+  (when (and (buffer-live-p buf)
+             (process-live-p (buffer-local-value 'ghostel--process buf)))
+    (with-current-buffer buf
+      (process-send-string ghostel--process (concat command "\n")))))
+
 (defun ghostel-agent--create (agent root &optional resume)
   "Create a new ghostel terminal running AGENT in ROOT.
 When RESUME is non-nil, use the agent profile's resume arguments."
   (let* ((profile (ghostel-agent--profile agent))
          (default-directory root)
-         (program (plist-get profile :program))
-         (args (if resume
-                   (plist-get profile :resume-args)
-                 (plist-get profile :args)))
-         (buf (generate-new-buffer (plist-get profile :buffer-name))))
-    (ghostel-exec buf program args)
+         (command (ghostel-agent--command-line profile resume))
+         (buf (save-window-excursion
+                (let ((ghostel-buffer-name (plist-get profile :buffer-name)))
+                  (ghostel t)
+                  (current-buffer)))))
     (with-current-buffer buf
       (setq ghostel-agent--agent agent
             ghostel-agent--project-root root))
+    (run-at-time ghostel-agent-command-delay nil
+                 #'ghostel-agent--send-command buf command)
     (setf (alist-get (ghostel-agent--key agent root)
                      ghostel-agent--buffer-alist nil nil #'equal) buf)
     buf))

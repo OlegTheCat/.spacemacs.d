@@ -91,7 +91,10 @@ This function should only modify configuration layer settings."
                                       (ghostel
                                        :location
                                        (recipe :fetcher github
-                                               :repo "dakra/ghostel")))
+                                               :repo "dakra/ghostel"
+                                               :files (:defaults "etc" "src" "vendor"
+                                                                 "build.zig" "build.zig.zon"
+                                                                 "symbols.map"))))
 
    ;; A list of packages that cannot be updated.
    dotspacemacs-frozen-packages '()
@@ -606,7 +609,8 @@ before packages are loaded."
                  "vterm-toggle"
                  "agent-shell-config"
                  "quick-diff"
-                 "ghostel"))
+                 "ghostel"
+                 "ghostel-agents"))
       (load (expand-file-name f config-dir)))))
 
 

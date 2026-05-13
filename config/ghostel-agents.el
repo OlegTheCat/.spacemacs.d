@@ -2,7 +2,8 @@
 
 (require 'cl-lib)
 (require 'seq)
-(require 'ghostel)
+
+(defvar ghostel-buffer-name)
 
 (defvar ghostel-agent-profiles
   '((claude

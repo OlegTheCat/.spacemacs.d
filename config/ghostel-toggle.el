@@ -2,7 +2,8 @@
 
 (require 'cl-lib)
 (require 'seq)
-(require 'ghostel)
+
+(defvar ghostel-buffer-name)
 
 (defvar ghostel-toggle--sessions nil
   "Alist mapping Ghostel terminal session ids to session plists.")

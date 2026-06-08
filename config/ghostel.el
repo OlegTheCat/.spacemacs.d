@@ -26,6 +26,13 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
     (adaptive-scroll-up))
   (define-key ghostel-semi-char-mode-map (kbd "M-v") #'ghostel-enter-copy-mode-and-scroll-up)
 
+  (defun ghostel-enter-copy-mode-and-mwheel-scroll (event)
+    "Enter copy mode and forward the mouse-wheel EVENT."
+    (interactive "e")
+    (ghostel-copy-mode)
+    (mwheel-scroll event))
+  (define-key ghostel-semi-char-mode-map (kbd "<wheel-up>") #'ghostel-enter-copy-mode-and-mwheel-scroll)
+
   (defun ghostel-copy-mode-flash-jump ()
     "Enter Ghostel copy mode if needed, then start `flash-jump'."
     (interactive)

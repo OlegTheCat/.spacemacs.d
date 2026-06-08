@@ -197,11 +197,12 @@
       (ghostel-toggle-session-mode 1)
       (setq-local tab-line-format '(:eval (ghostel-toggle--tab-line))))))
 
-(defun ghostel-toggle--register-session (root buf &optional label)
+(defun ghostel-toggle--register-session (root buf &optional label id)
   "Register BUF as a terminal session in ROOT.
-LABEL, when non-nil, overrides the generated tab label."
+LABEL, when non-nil, overrides the generated tab label.
+ID, when non-nil, is used as the session id."
   (let* ((root (ghostel-toggle--normalize-root root))
-         (id (ghostel-toggle--next-session-id))
+         (id (or id (ghostel-toggle--next-session-id)))
          (session (list :id id
                         :root root
                         :buffer buf
@@ -269,6 +270,14 @@ When ROOT is non-nil, refresh only sessions in that project."
              (window-parameters . ((ghostel-toggle-window . t)
                                    (no-delete-other-windows . t))))))))
 
+(defun ghostel-toggle--display-buffer-in-terminal-window (buf _alist)
+  "Display BUF in the ghostel terminal drawer for `display-buffer'."
+  (let ((buffer (get-buffer buf)))
+    (when (and buffer
+               (with-current-buffer buffer
+                 (derived-mode-p 'ghostel-mode)))
+      (ghostel-toggle--display-terminal-window buffer))))
+
 (defun ghostel-toggle--finish-terminal-window (win)
   "Apply terminal drawer window settings to WIN."
   (when (window-live-p win)
@@ -293,26 +302,19 @@ When ROOT is non-nil, refresh only sessions in that project."
   "Create a new Ghostel terminal in ROOT and return its window."
   (let* ((root (ghostel-toggle--normalize-root root))
          (default-directory root)
-         (buf (generate-new-buffer "*ghostel-terminal*"))
-         (session (ghostel-toggle--register-session root buf))
-         (identity (ghostel-toggle--buffer-name root (plist-get session :id)))
-         (setup-locals (lambda ()
-                         (when (eq (current-buffer) buf)
-                           (ghostel-toggle--install-buffer-locals session)))))
-    (with-current-buffer buf
-      (setq default-directory root)
-      (rename-buffer identity t))
+         (id (ghostel-toggle--next-session-id))
+         (identity (ghostel-toggle--buffer-name root id))
+         buf
+         session)
+    (let ((display-buffer-overriding-action
+           '((ghostel-toggle--display-buffer-in-terminal-window))))
+      (let ((ghostel-buffer-name identity)
+            (default-directory root))
+        (setq buf (ghostel nil))))
+    (setq session (ghostel-toggle--register-session root buf nil id))
     (ghostel-toggle--select-session session)
-    (let ((win (ghostel-toggle--display-terminal-window buf)))
-      (select-window win)
-      (unwind-protect
-          (progn
-            (add-hook 'ghostel-mode-hook setup-locals)
-            (let ((ghostel-buffer-name identity)
-                  (default-directory root))
-              (setq buf (ghostel nil))))
-        (remove-hook 'ghostel-mode-hook setup-locals))
-      (plist-put session :buffer buf)
+    (let ((win (or (get-buffer-window buf t)
+                   (ghostel-toggle--display-terminal-window buf))))
       (ghostel-toggle--finish-terminal-window win)
       (ghostel-toggle--install-buffer-locals session)
       (ghostel-toggle--refresh-tab-lines root)

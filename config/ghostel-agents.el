@@ -243,12 +243,13 @@ When AGENT is non-nil, restrict the result to that agent."
       (ghostel-agent-session-mode 1)
       (setq-local tab-line-format '(:eval (ghostel-agent--tab-line))))))
 
-(defun ghostel-agent--register-session (agent root buf &optional resume label)
+(defun ghostel-agent--register-session (agent root buf &optional resume label id)
   "Register BUF as an AGENT session in ROOT.
 When RESUME is non-nil, the session was started in resume mode.
-LABEL, when non-nil, overrides the generated tab label."
+LABEL, when non-nil, overrides the generated tab label.
+ID, when non-nil, is used as the session id."
   (let* ((root (ghostel-agent--normalize-root root))
-         (id (ghostel-agent--next-session-id))
+         (id (or id (ghostel-agent--next-session-id)))
          (session (list :id id
                         :agent agent
                         :root root
@@ -382,6 +383,14 @@ When RESUME is non-nil, include the profile's resume arguments."
              (window-width . ,ghostel-agent-width)
              (window-parameters . ((no-delete-other-windows . t))))))))
 
+(defun ghostel-agent--display-buffer-in-sidebar (buf _alist)
+  "Display BUF in the ghostel agent side window for `display-buffer'."
+  (let ((buffer (get-buffer buf)))
+    (when (and buffer
+               (with-current-buffer buffer
+                 (derived-mode-p 'ghostel-mode)))
+      (ghostel-agent--display-sidebar-window buffer))))
+
 (defun ghostel-agent--finish-sidebar-window (win)
   "Apply sidebar window settings to WIN."
   (when (window-live-p win)
@@ -396,26 +405,20 @@ When RESUME is non-nil, use the agent profile's resume arguments."
          (profile (ghostel-agent--profile agent))
          (default-directory root)
          (command (ghostel-agent--command-line profile resume))
-         (buf (generate-new-buffer (plist-get profile :buffer-name)))
-         (session (ghostel-agent--register-session agent root buf resume))
+         (id (ghostel-agent--next-session-id))
          (identity (ghostel-agent--buffer-name
-                    agent root (plist-get session :id)))
-         (setup-locals (lambda ()
-                         (when (eq (current-buffer) buf)
-                           (ghostel-agent--install-buffer-locals session)))))
-    (with-current-buffer buf
-      (setq default-directory root)
-      (rename-buffer identity t))
+                    agent root id))
+         buf
+         session)
+    (let ((display-buffer-overriding-action
+           '((ghostel-agent--display-buffer-in-sidebar))))
+      (let ((ghostel-buffer-name identity)
+            (default-directory root))
+        (setq buf (ghostel nil))))
+    (setq session (ghostel-agent--register-session agent root buf resume nil id))
     (ghostel-agent--select-session session)
-    (let ((win (ghostel-agent--display-sidebar-window buf)))
-      (select-window win)
-      (unwind-protect
-          (progn
-            (add-hook 'ghostel-mode-hook setup-locals)
-            (let ((ghostel-buffer-name identity))
-              (setq buf (ghostel nil))))
-        (remove-hook 'ghostel-mode-hook setup-locals))
-      (plist-put session :buffer buf)
+    (let ((win (or (get-buffer-window buf t)
+                   (ghostel-agent--display-sidebar-window buf))))
       (ghostel-agent--finish-sidebar-window win)
       (ghostel-agent--install-buffer-locals session)
       (run-at-time ghostel-agent-command-delay nil

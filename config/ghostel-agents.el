@@ -48,6 +48,11 @@
 (defvar ghostel-agent-width 0.55
   "Width of the sidebar as a fraction of the frame.")
 
+(defvar ghostel-agent--fullscreen-config nil
+  "Saved window configuration to restore when leaving fullscreen.
+Non-nil only while a ghostel agent session fills the frame; see
+`ghostel-agent-toggle-fullscreen'.")
+
 (defvar ghostel-agent-command-delay 0.3
   "Seconds to wait before sending the agent command to a new shell.")
 
@@ -391,13 +396,26 @@ executing the command."
              (window-width . ,ghostel-agent-width)
              (window-parameters . ((no-delete-other-windows . t))))))))
 
+(defun ghostel-agent--display-fullscreen-window (buf)
+  "Display BUF in the current full-frame window and return it.
+Used while a session is shown fullscreen so creating or switching
+sessions reuses that window instead of spawning a side window."
+  (let ((win (selected-window)))
+    (set-window-dedicated-p win nil)
+    (set-window-buffer win buf)
+    win))
+
 (defun ghostel-agent--display-buffer-in-sidebar (buf _alist)
-  "Display BUF in the ghostel agent side window for `display-buffer'."
+  "Display BUF for `display-buffer'.
+Targets the side window, or the current full-frame window while a
+session is shown fullscreen."
   (let ((buffer (get-buffer buf)))
     (when (and buffer
                (with-current-buffer buffer
                  (derived-mode-p 'ghostel-mode)))
-      (ghostel-agent--display-sidebar-window buffer))))
+      (if ghostel-agent--fullscreen-config
+          (ghostel-agent--display-fullscreen-window buffer)
+        (ghostel-agent--display-sidebar-window buffer)))))
 
 (defun ghostel-agent--finish-sidebar-window (win)
   "Apply sidebar window settings to WIN."
@@ -426,8 +444,11 @@ When RESUME is non-nil, use the agent profile's resume arguments."
     (setq session (ghostel-agent--register-session agent root buf resume nil id))
     (ghostel-agent--select-session session)
     (let ((win (or (get-buffer-window buf t)
-                   (ghostel-agent--display-sidebar-window buf))))
-      (ghostel-agent--finish-sidebar-window win)
+                   (if ghostel-agent--fullscreen-config
+                       (ghostel-agent--display-fullscreen-window buf)
+                     (ghostel-agent--display-sidebar-window buf)))))
+      (unless ghostel-agent--fullscreen-config
+        (ghostel-agent--finish-sidebar-window win))
       (ghostel-agent--install-buffer-locals session)
       (run-at-time ghostel-agent-command-delay nil
                    #'ghostel-agent--send-command buf command)
@@ -441,11 +462,17 @@ When RESUME is non-nil, use the agent profile's resume arguments."
     win))
 
 (defun ghostel-agent--show-session (session)
-  "Display SESSION in the ghostel side window and return that window."
+  "Display SESSION and return its window.
+Normally this targets the side window, but while a session is shown
+fullscreen (see `ghostel-agent-toggle-fullscreen') it reuses the
+current full-frame window so switching sessions stays fullscreen."
   (unless (ghostel-agent--session-live-p session)
     (user-error "Ghostel agent session is no longer live"))
   (ghostel-agent--select-session session)
-  (ghostel-agent--show-sidebar (plist-get session :buffer)))
+  (let ((buf (plist-get session :buffer)))
+    (if ghostel-agent--fullscreen-config
+        (ghostel-agent--display-fullscreen-window buf)
+      (ghostel-agent--show-sidebar buf))))
 
 (defun ghostel-agent--show-session-by-id (id)
   "Display ghostel agent session ID."
@@ -567,6 +594,9 @@ SELECTED-ID is the selected session id for the current root."
          (in-sidebar (and buf (eq (current-buffer) buf))))
     (ghostel-agent--select-session session)
     (cond
+     ;; Fullscreen → collapse back to the sidebar.
+     (ghostel-agent--fullscreen-config
+      (ghostel-agent--exit-fullscreen))
      ;; Visible + focused → hide
      ((and win in-sidebar)
       (when (and ghostel-agent--last-window
@@ -588,6 +618,55 @@ SELECTED-ID is the selected session id for the current root."
       (select-window (ghostel-agent--show-sidebar buf)))
      (t
       (user-error "Ghostel agent session is no longer live")))))
+
+(defun ghostel-agent--fullscreen-target ()
+  "Return the ghostel agent buffer to fullscreen, or nil.
+Prefer the focused buffer, then the sidebar buffer, then this
+project's default session."
+  (or (and (derived-mode-p 'ghostel-mode) (current-buffer))
+      (when-let* ((win (ghostel-agent--sidebar-window)))
+        (window-buffer win))
+      (when-let* ((root (or (ghostel-agent--current-root)
+                            (ghostel-agent--project-root)))
+                  (session (ghostel-agent--default-session root)))
+        (ghostel-agent--session-buffer session))))
+
+(defun ghostel-agent--enter-fullscreen (buf)
+  "Expand BUF to fill the frame, saving the layout for later restore."
+  (setq ghostel-agent--fullscreen-config (current-window-configuration))
+  (set-window-dedicated-p (selected-window) nil)
+  (switch-to-buffer buf)
+  ;; Bind `ignore-window-parameters' so the dedicated sidebar (and any
+  ;; other side windows) collapse too, giving a truly full-frame buffer.
+  (let ((ignore-window-parameters t))
+    (delete-other-windows)))
+
+(defun ghostel-agent--exit-fullscreen ()
+  "Restore the window layout saved before going fullscreen."
+  (let ((config ghostel-agent--fullscreen-config)
+        (buf (and (derived-mode-p 'ghostel-mode) (current-buffer))))
+    (setq ghostel-agent--fullscreen-config nil)
+    (when (window-configuration-p config)
+      (set-window-configuration config))
+    ;; Reflect any session switch made while fullscreen back into the sidebar.
+    (when-let* ((live (and (buffer-live-p buf) buf))
+                (session (ghostel-agent--session-for-buffer live)))
+      (ghostel-agent--show-session session))))
+
+(defun ghostel-agent-toggle-fullscreen ()
+  "Toggle the active ghostel agent session between the sidebar and fullscreen.
+When the session is shown in the sidebar, expand it to fill the frame for
+distraction-free reading; invoke again to restore the previous layout and
+return the session to the sidebar.  Creating (`s-t') and switching
+(`s-<left>'/`s-<right>') sessions stay fullscreen, with the tab line listing
+every session."
+  (interactive)
+  (if ghostel-agent--fullscreen-config
+      (ghostel-agent--exit-fullscreen)
+    (let ((buf (ghostel-agent--fullscreen-target)))
+      (unless buf
+        (user-error "No ghostel agent session to show fullscreen"))
+      (ghostel-agent--enter-fullscreen buf))))
 
 (defun ghostel-agent-toggle (agent resume &optional _force-show root)
   "Compatibility wrapper for toggling AGENT in ROOT.
@@ -693,5 +772,6 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
 
 (global-set-key (kbd "s-l") #'ghostel-agent-toggle-command)
 (global-set-key (kbd "s-t") #'ghostel-agent-new-session-command)
+(global-set-key (kbd "s-<return>") #'ghostel-agent-toggle-fullscreen)
 
 ;;; ghostel-agents.el ends here

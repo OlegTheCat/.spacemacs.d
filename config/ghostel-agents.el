@@ -347,11 +347,19 @@ When RESUME is non-nil, include the profile's resume arguments."
              " "))
 
 (defun ghostel-agent--send-command (buf command)
-  "Send COMMAND to the shell running in BUF."
+  "Send COMMAND to the shell running in BUF, then press Return.
+Uses the public ghostel input API rather than writing to
+`ghostel--process' directly: since v0.26.0 that variable is the
+native event pipe (not the shell) whenever Ghostel owns the PTY, so
+`process-send-string' no longer reaches the shell.  Typing the
+command as keystrokes also avoids bracketed-paste protection, which
+would otherwise insert the trailing newline literally instead of
+executing the command."
   (when (and (buffer-live-p buf)
              (process-live-p (buffer-local-value 'ghostel--process buf)))
     (with-current-buffer buf
-      (process-send-string ghostel--process (concat command "\n")))))
+      (ghostel-send-string command)
+      (ghostel-send-key "return"))))
 
 (defun ghostel-agent--sidebar-window-p (win)
   "Return non-nil when WIN is the ghostel agent side window."

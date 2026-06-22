@@ -585,10 +585,11 @@ SELECTED-ID is the selected session id for the current root."
 
 (defun ghostel-agent-toggle-session (session)
   "Smart toggle for SESSION's ghostel sidebar.
-1. Not visible → show (create if needed).
-2. Visible + focused → hide.
-3. Visible + not focused + region → send region & focus.
-4. Visible + not focused → focus."
+1. Not visible + region → show, send region & focus.
+2. Not visible → show.
+3. Visible + focused → hide.
+4. Visible + not focused + region → send region & focus.
+5. Visible + not focused → focus."
   (let* ((buf (ghostel-agent--session-buffer session))
          (win (and buf (get-buffer-window buf t)))
          (in-sidebar (and buf (eq (current-buffer) buf))))
@@ -612,8 +613,10 @@ SELECTED-ID is the selected session id for the current root."
      (win
       (ghostel-agent--remember-last-window)
       (select-window win))
-     ;; Buffer exists but not visible → show
+     ;; Buffer exists but not visible → show (sending any region first)
      (buf
+      (when (use-region-p)
+        (ghostel-agent--send-region buf))
       (ghostel-agent--remember-last-window)
       (select-window (ghostel-agent--show-sidebar buf)))
      (t

@@ -642,7 +642,15 @@ project's default session."
   ;; Bind `ignore-window-parameters' so the dedicated sidebar (and any
   ;; other side windows) collapse too, giving a truly full-frame buffer.
   (let ((ignore-window-parameters t))
-    (delete-other-windows)))
+    (delete-other-windows))
+  ;; If we promoted the sidebar (a side window) it keeps its side-window
+  ;; parameters, which makes Emacs refuse `switch-to-buffer' here.  Strip
+  ;; them so the full-frame window behaves like an ordinary window; exit
+  ;; restores the real sidebar from the saved configuration regardless.
+  (let ((win (selected-window)))
+    (set-window-parameter win 'window-side nil)
+    (set-window-parameter win 'window-slot nil)
+    (set-window-parameter win 'no-delete-other-windows nil)))
 
 (defun ghostel-agent--exit-fullscreen ()
   "Restore the window layout saved before going fullscreen."

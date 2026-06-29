@@ -80,7 +80,6 @@ This function should only modify configuration layer settings."
                                        (recipe :fetcher github
                                                :repo "cmacrae/agent-shell-sidebar"))
                                       persistent-scratch
-                                      beacon
                                       highlight-symbol
                                       reverse-im
                                       vdiff

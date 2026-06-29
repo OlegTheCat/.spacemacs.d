@@ -23,12 +23,6 @@
 (add-to-list 'golden-ratio-exclude-modes "sr-mode")
 (add-to-list 'golden-ratio-exclude-modes "sr-buttons-mode")
 
-;; Beacon mode
-(beacon-mode 1)
-(setq beacon-size 10)
-(setq beacon-blink-when-buffer-changes nil)
-(setq beacon-blink-when-window-scrolls nil)
-
 ;; Git Link
 (setq git-link-use-commit t)
 (setq git-link-open-in-browser nil)

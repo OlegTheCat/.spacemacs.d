@@ -37,11 +37,30 @@ Reversal adds a level (shrinks step), same direction removes one (grows step)."
    (t
     (setq adaptive-scroll--level (1+ adaptive-scroll--level))))
   (setq adaptive-scroll--last-direction direction)
-  (with-selected-window (selected-window)
-    (let ((lines (adaptive-scroll--step-lines)))
-      (if (eq direction 'down)
-          (forward-visible-line lines)
-        (forward-visible-line (- lines))))))
+  ;; Move point like a cursor; only scroll the window once point would leave the
+  ;; visible page — and do that via `set-window-start' (redisplay's fast path),
+  ;; not by moving point off-screen, which forces a full-window relayout every
+  ;; press (~70ms, a hang on heavy-markup ghostel buffers under load).
+  (let* ((lines (adaptive-scroll--step-lines))
+         (target (save-excursion
+                   (forward-visible-line (if (eq direction 'down) lines (- lines)))
+                   (point))))
+    (cond
+     ;; Target still on-screen: just move the cursor, leave the window put.
+     ((pos-visible-in-window-p target)
+      (goto-char target))
+     ;; Scrolling up past the top: put the target on the first line.
+     ((eq direction 'up)
+      (set-window-start (selected-window) target)
+      (goto-char target))
+     ;; Scrolling down past the bottom: put the target on the last line.
+     (t
+      (set-window-start (selected-window)
+                        (save-excursion
+                          (goto-char target)
+                          (forward-visible-line (- (1- (window-text-height))))
+                          (point)))
+      (goto-char target)))))
 
 ;;;###autoload
 (defun adaptive-scroll-down (&optional _arg)

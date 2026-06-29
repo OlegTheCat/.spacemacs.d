@@ -114,6 +114,39 @@ Workflow for iterating on elisp:
 2. Load it into Emacs with `(load ...)`
 3. Verify by calling the function or inspecting state
 
+## Window-Mutating Tests in the Live Frame
+
+`emacsclient --eval` runs in the user's **live GUI frame**. Read-only checks
+(`lookup-key`, `buffer-list`, byte-compile, `(load ...)`) are safe and silent.
+But tests that mutate window layout — driving fullscreen/sidebar commands,
+`set-window-configuration`, `delete-other-windows`, `split-window` — disrupt
+whatever the user is doing, and can error depending on where their point is.
+
+**Ask the user to take over the frame for a couple of minutes before running
+disruptive window tests.** They'll step away and let it drive cleanly. Don't
+poke their live layout while they're working.
+
+When you do run such a test, make it self-restoring and focus-immune:
+
+```elisp
+(let ((orig (current-window-configuration))
+      (ignore-window-parameters t))   ; immune to current side-window focus
+  (unwind-protect
+      (progn ;; ...window-mutating test...
+        )
+    (set-window-configuration orig)))
+```
+
+- Save `current-window-configuration` up front and restore it in
+  `unwind-protect`, so an error mid-test still restores the layout.
+- Bind `ignore-window-parameters` to `t` around the test. Without it,
+  `delete-other-windows` signals **"Cannot make side window the only window"**
+  when the user is focused in a side window (e.g. a sidebar).
+- Save/restore any global state the code touches (e.g. registries, alists) the
+  same way.
+- Write results to a scratch file (`with-temp-file`) and read it back —
+  `--eval` prints the return value, not `message` output.
+
 ## Killing Buffers Safely
 
 Two prompts can block `emacsclient` when killing buffers:

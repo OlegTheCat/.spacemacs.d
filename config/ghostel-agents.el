@@ -994,50 +994,45 @@ and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
                    "Two reasons:\n1. first item wraps here\n2. second"))
     (should (equal (ghostel-agent--clean-text "⏺ a\n  b" t) "a\nb"))))
 
-(defvar ghostel-agent--home-fullscreen-views nil
-  "Alist mapping agent symbols to their home-dir fullscreen views.")
+(defun ghostel-agent--ensure-buffer (agent root resume)
+  "Return AGENT's live buffer in ROOT, creating the session if needed.
+Creation is isolated from any current fullscreen view — `ghostel-agent--create'
+otherwise reuses it and repoints it at the new buffer — so promoting the home
+agent from inside a project's fullscreen cannot hijack that project's view."
+  (or (ghostel-agent--get-buffer agent root)
+      (progn
+        (save-window-excursion
+          (let ((ghostel-agent--fullscreen-views nil))
+            (ghostel-agent--create agent root resume)))
+        (ghostel-agent--get-buffer agent root))))
 
 (defun ghostel-agent-home-toggle (arg)
   "Toggle a fullscreen agent session rooted in the home directory.
-Prefix ARG follows the same convention as `ghostel-agent-toggle-command':
-plain = Claude, `C-u' = Claude resume, `C-2' = Codex, `C-3' = Codex resume.
-Pressing again restores the previous window layout."
+Prefix ARG follows `ghostel-agent-toggle-command' conventions: plain =
+Claude, `C-u' = Claude resume, `C-2' = Codex, `C-3' = Codex resume.
+Promotes the home (~/) agent to fullscreen from any project; press again
+to restore the previous layout.  Keyed by the home root through the same
+machinery as the project fullscreen, so the two no longer collide."
   (interactive "P")
   (let* ((parsed (ghostel-agent--parse-prefix arg))
          (agent (or (car parsed) 'claude))
          (resume (cadr parsed))
          (root (ghostel-agent--normalize-root "~/"))
-         (view (alist-get agent ghostel-agent--home-fullscreen-views)))
-    (cond
-     ;; Already showing this agent's home fullscreen → exit.
-     ;; Restore config directly instead of `ghostel-agent--exit-fullscreen'
-     ;; which would show the home buffer in the project sidebar.
-     ((and view
-           (buffer-live-p (plist-get view :agent))
-           (eq (current-buffer) (plist-get view :agent)))
-      (let ((config (plist-get view :config)))
-        (setq ghostel-agent--fullscreen-views
-              (delq view ghostel-agent--fullscreen-views))
-        (setf (alist-get agent ghostel-agent--home-fullscreen-views) nil)
-        (when (window-configuration-p config)
-          (set-window-configuration config))))
-     ;; Session exists → enter fullscreen.
-     ((ghostel-agent--last-session-for-agent agent root)
-      (let* ((session (ghostel-agent--last-session-for-agent agent root))
-             (buf (ghostel-agent--session-buffer session)))
-        (when (and view (buffer-live-p (plist-get view :agent)))
-          (ghostel-agent--exit-fullscreen view))
-        (ghostel-agent--enter-fullscreen buf)
-        (setf (alist-get agent ghostel-agent--home-fullscreen-views)
-              (car ghostel-agent--fullscreen-views))))
-     ;; No session → create, then fullscreen.
-     (t
-      (let* ((win (ghostel-agent--create agent root resume))
-             (buf (window-buffer win)))
-        (delete-window (ghostel-agent--sidebar-window))
-        (ghostel-agent--enter-fullscreen buf)
-        (setf (alist-get agent ghostel-agent--home-fullscreen-views)
-              (car ghostel-agent--fullscreen-views)))))))
+         (view (ghostel-agent--fullscreen-view-for-root root)))
+    (if view
+        ;; Demote: restore the saved layout directly.  Not
+        ;; `ghostel-agent--exit-fullscreen', whose trailing `show-session'
+        ;; would leak the home agent into the project's sidebar.
+        (progn
+          (setq ghostel-agent--fullscreen-views
+                (delq view ghostel-agent--fullscreen-views))
+          (when (window-configuration-p (plist-get view :config))
+            (set-window-configuration (plist-get view :config))))
+      (let ((buf (ghostel-agent--ensure-buffer agent root resume)))
+        (unless (buffer-live-p buf)
+          (user-error "Could not start home %s session" agent))
+        (ghostel-agent--remember-last-window)
+        (ghostel-agent--enter-fullscreen buf)))))
 
 (add-hook 'ghostel-exit-functions #'ghostel-agent--after-exit)
 

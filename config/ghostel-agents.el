@@ -50,12 +50,15 @@
   "Width of the sidebar as a fraction of the frame.")
 
 (defvar ghostel-agent--fullscreen-views nil
-  "List of active fullscreen views, one per concurrent fullscreen.
-Each entry is a plist (:agent BUF :other BUF :config WINDOW-CONFIG):
-the agent buffer filling the frame, the code buffer it flips to, and
-the window configuration to restore on exit.  Which view is active is
-derived from the buffer in the current full-frame window, so several
-projects/layouts can be fullscreen independently.")
+  "List of fullscreen views, one per project root in fullscreen mode.
+Each entry is a plist (:agent BUF :root ROOT :config WINDOW-CONFIG
+:hidden BOOL): the agent buffer, the project root that keys the view,
+the window configuration to restore when leaving fullscreen, and whether
+the agent is currently hidden (collapsed to the code by `s-l') while
+fullscreen mode persists.  Fullscreen mode is sticky — it lasts until
+`s-<return>' demotes it back to the sidebar; plain `s-l' only toggles the
+agent's visibility within that mode.  Keying by root lets several
+projects be in fullscreen mode independently.")
 
 (defvar ghostel-agent--fullscreen-display nil
   "When non-nil, the view whose full-frame window should receive a display.
@@ -68,19 +71,31 @@ instead of opening a side window.")
         (seq-filter (lambda (v) (buffer-live-p (plist-get v :agent)))
                     ghostel-agent--fullscreen-views)))
 
-(defun ghostel-agent--fullscreen-view-for (buffer)
-  "Return the fullscreen view whose agent or code side is BUFFER, or nil."
-  (seq-find (lambda (v)
-              (or (eq buffer (plist-get v :agent))
-                  (eq buffer (plist-get v :other))))
+(defun ghostel-agent--fullscreen-view-for-agent (buffer)
+  "Return the fullscreen view whose agent buffer is BUFFER, or nil."
+  (seq-find (lambda (v) (eq buffer (plist-get v :agent)))
             ghostel-agent--fullscreen-views))
 
-(defun ghostel-agent--current-fullscreen-view ()
-  "Return the fullscreen view shown in the selected window, or nil.
-The view is found by the selected buffer's membership, so after
-switching project/workspace/frame the correct view (or none) is used."
+(defun ghostel-agent--fullscreen-view-for-root (root)
+  "Return the fullscreen view (shown or hidden) for project ROOT, or nil.
+Keyed by root rather than the current buffer so plain `s-l' and
+`s-<return>' find a project's fullscreen session even while it is hidden
+and point is on a code buffer."
   (ghostel-agent--prune-fullscreen-views)
-  (ghostel-agent--fullscreen-view-for (current-buffer)))
+  (let ((root (ghostel-agent--normalize-root root)))
+    (seq-find (lambda (v) (equal root (plist-get v :root)))
+              ghostel-agent--fullscreen-views)))
+
+(defun ghostel-agent--current-fullscreen-view ()
+  "Return the fullscreen view shown full-frame in the selected window, or nil.
+The agent must be the selected buffer and fill the frame, and the view
+must not be hidden.  Display routing (session switching, new sessions)
+uses this so a split pane or a hidden session is never mistaken for the
+fullscreen window."
+  (ghostel-agent--prune-fullscreen-views)
+  (and (one-window-p t)
+       (let ((v (ghostel-agent--fullscreen-view-for-agent (current-buffer))))
+         (and v (not (plist-get v :hidden)) v))))
 
 (defvar ghostel-agent-command-delay 0.3
   "Seconds to wait before sending the agent command to a new shell.")
@@ -672,61 +687,8 @@ project's default session."
                   (session (ghostel-agent--default-session root)))
         (ghostel-agent--session-buffer session))))
 
-(defun ghostel-agent--code-buffer-p (buf)
-  "Return non-nil when BUF is a live, non-ghostel, non-internal buffer."
-  (and (buffer-live-p buf)
-       (not (string-prefix-p " " (buffer-name buf)))
-       (not (with-current-buffer buf (derived-mode-p 'ghostel-mode)))))
-
-(defun ghostel-agent--last-code-buffer ()
-  "Return the most recently used code buffer, or nil."
-  (seq-find (lambda (b)
-              (and (not (eq b (current-buffer)))
-                   (ghostel-agent--code-buffer-p b)))
-            (buffer-list)))
-
-(defun ghostel-agent--fullscreen-initial-other ()
-  "Return the code buffer to flip to first while entering fullscreen.
-Called before switching to the agent buffer, so `current-buffer' is
-still whatever was selected when fullscreen was requested."
-  (or (and (ghostel-agent--code-buffer-p (current-buffer)) (current-buffer))
-      (and (window-live-p ghostel-agent--last-window)
-           (let ((b (window-buffer ghostel-agent--last-window)))
-             (and (ghostel-agent--code-buffer-p b) b)))
-      (ghostel-agent--last-code-buffer)))
-
-(defun ghostel-agent--fullscreen-flip (view)
-  "Flip VIEW's full-frame window between its agent and code buffers.
-On the agent, show the paired code buffer.  On a code buffer, remember
-it, send any active region to the agent, then show the agent."
-  (let ((win (selected-window))
-        (agent (plist-get view :agent))
-        (other (plist-get view :other)))
-    (if (eq (current-buffer) agent)
-        ;; On the agent → return to the paired code buffer.
-        (progn
-          (unless (ghostel-agent--code-buffer-p other)
-            (setq other (ghostel-agent--last-code-buffer))
-            (plist-put view :other other))
-          (unless (ghostel-agent--code-buffer-p other)
-            (user-error "No buffer to flip to"))
-          (set-window-dedicated-p win nil)
-          (switch-to-buffer other))
-      ;; On a code buffer → remember it, optionally send region, show agent.
-      (unless (buffer-live-p agent)
-        (user-error "No agent buffer to flip to"))
-      (plist-put view :other (current-buffer))
-      (when (use-region-p)
-        (ghostel-agent--send-region agent))
-      (set-window-dedicated-p win nil)
-      (switch-to-buffer agent))))
-
-(defun ghostel-agent--enter-fullscreen (buf)
-  "Expand agent BUF to fill the frame, registering a fullscreen view."
-  (push (list :agent buf
-              :other (ghostel-agent--fullscreen-initial-other)
-              :config (current-window-configuration))
-        ghostel-agent--fullscreen-views)
+(defun ghostel-agent--fill-frame (buf)
+  "Show BUF in the selected window and expand it to fill the frame."
   (set-window-dedicated-p (selected-window) nil)
   (switch-to-buffer buf)
   ;; Bind `ignore-window-parameters' so the dedicated sidebar (and any
@@ -742,6 +704,33 @@ it, send any active region to the agent, then show the agent."
     (set-window-parameter win 'window-slot nil)
     (set-window-parameter win 'no-delete-other-windows nil)))
 
+(defun ghostel-agent--enter-fullscreen (buf)
+  "Expand agent BUF to fill the frame, registering a fullscreen view.
+The view is keyed by BUF's session root so `s-l'/`s-<return>' can find
+it later even while it is hidden and point is on a code buffer."
+  (let ((root (when-let* ((session (ghostel-agent--session-for-buffer buf)))
+                (plist-get session :root))))
+    (push (list :agent buf
+                :root (and root (ghostel-agent--normalize-root root))
+                :config (current-window-configuration)
+                :hidden nil)
+          ghostel-agent--fullscreen-views))
+  (ghostel-agent--fill-frame buf))
+
+(defun ghostel-agent--show-fullscreen (view)
+  "Show VIEW's agent fullscreen and mark the view visible.
+Fullscreen is sticky: `s-l' uses this to (re-)expand the agent after it
+was hidden or the frame was split.  Re-snapshots the layout the agent is
+about to cover (unless already on the agent) so hiding/demoting returns to
+the current splits, not the stale layout captured when fullscreen began."
+  (let ((buf (plist-get view :agent)))
+    (unless (buffer-live-p buf)
+      (user-error "Fullscreen agent buffer is no longer live"))
+    (unless (eq (current-buffer) buf)
+      (plist-put view :config (current-window-configuration)))
+    (plist-put view :hidden nil)
+    (ghostel-agent--fill-frame buf)))
+
 (defun ghostel-agent--exit-fullscreen (view)
   "Restore the layout saved for VIEW and deregister it."
   (let ((config (plist-get view :config))
@@ -756,6 +745,22 @@ it, send any active region to the agent, then show the agent."
                 (session (ghostel-agent--session-for-buffer live)))
       (ghostel-agent--show-session session))))
 
+(defun ghostel-agent--hide-fullscreen (view)
+  "Hide VIEW's agent, collapsing to just the code, but keep fullscreen mode.
+Restores the pre-fullscreen layout, deletes the agent's window(s), and
+marks VIEW hidden so the next `s-l' re-expands it to fullscreen.  Only
+`s-<return>' (`ghostel-agent--exit-fullscreen') leaves fullscreen mode."
+  (let ((agent (plist-get view :agent)))
+    (plist-put view :hidden t)
+    (when (window-configuration-p (plist-get view :config))
+      (set-window-configuration (plist-get view :config)))
+    (dolist (win (get-buffer-window-list agent nil nil))
+      (when (window-parent win)            ; never the frame's sole window
+        (delete-window win)))
+    (when (and ghostel-agent--last-window
+               (window-live-p ghostel-agent--last-window))
+      (select-window ghostel-agent--last-window))))
+
 (defun ghostel-agent-toggle-fullscreen ()
   "Toggle the active ghostel agent session between the sidebar and fullscreen.
 When the session is shown in the sidebar, expand it to fill the frame for
@@ -764,11 +769,16 @@ return the session to the sidebar.  Creating (`s-t') and switching
 (`s-<left>'/`s-<right>') sessions stay fullscreen, with the tab line listing
 every session.
 
-While fullscreen, plain `s-l' flips the frame between the agent and the
-last code buffer (sending any active region first) without leaving
-fullscreen; this command is the only way back to the sidebar layout."
+Fullscreen is a sticky mode: once promoted, plain `s-l' only toggles the
+agent's visibility (hide to the code / re-expand), and this command is
+the only way to demote the session back to the sidebar."
   (interactive)
-  (let ((view (ghostel-agent--current-fullscreen-view)))
+  ;; Look up by project root so an active view is found whether it is
+  ;; shown, split, or hidden with point on a code buffer.
+  (let* ((root (ghostel-agent--normalize-root
+                (or (ghostel-agent--current-root)
+                    (ghostel-agent--project-root))))
+         (view (ghostel-agent--fullscreen-view-for-root root)))
     (if view
         (ghostel-agent--exit-fullscreen view)
       (let ((buf (ghostel-agent--fullscreen-target)))
@@ -802,20 +812,41 @@ Plain commands target the selected session for this project.
    ((equal arg 3) '(codex t))
    (t (user-error "Unknown ghostel agent prefix: %S" arg))))
 
+(defun ghostel-agent--fullscreen-sl (view)
+  "Plain `s-l' action for fullscreen VIEW (sticky fullscreen mode).
+On the agent shown full-frame, hide it (collapse to the code).  Otherwise
+\(hidden, split, or on a code buffer) re-expand the agent to fullscreen,
+sending any active region from a code buffer first."
+  (let ((agent (plist-get view :agent)))
+    (if (and (not (plist-get view :hidden))
+             (eq (current-buffer) agent)
+             (one-window-p t))
+        (ghostel-agent--hide-fullscreen view)
+      (progn
+        (when (and (not (eq (current-buffer) agent))
+                   (use-region-p))
+          (ghostel-agent--send-region agent))
+        (ghostel-agent--show-fullscreen view)))))
+
 (defun ghostel-agent-toggle-command (arg)
   "Toggle a ghostel agent sidebar based on prefix ARG.
-Plain `s-l' toggles the selected session for this project; while
-fullscreen it instead flips the frame between the agent and the last
-code buffer (see `ghostel-agent-toggle-fullscreen').
+Plain `s-l' toggles the selected session for this project.  While this
+project is in fullscreen mode it instead toggles the agent's visibility:
+hide it (to the code) when shown, or re-expand it to fullscreen when
+hidden or split (sending any active region first).  Fullscreen mode is
+sticky until `s-<return>' demotes it (see `ghostel-agent-toggle-fullscreen').
 `C-u s-l' toggles the latest Claude session, creating a resume
 session if none exists.  `C-2 s-l' toggles the latest Codex session,
 and `C-3 s-l' creates a Codex resume session only when no Codex
 session exists yet."
   (interactive "P")
-  (let ((view (and (null arg) (ghostel-agent--current-fullscreen-view))))
+  (let* ((root (ghostel-agent--normalize-root
+                (or (ghostel-agent--current-root)
+                    (ghostel-agent--project-root))))
+         (view (and (null arg)
+                    (ghostel-agent--fullscreen-view-for-root root))))
     (if view
-        ;; Plain `s-l' while fullscreen flips between agent and code in place.
-        (ghostel-agent--fullscreen-flip view)
+        (ghostel-agent--fullscreen-sl view)
       (let* ((parsed (ghostel-agent--parse-prefix arg))
              (agent (car parsed))
              (resume (cadr parsed))

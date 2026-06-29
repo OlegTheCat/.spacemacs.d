@@ -880,10 +880,56 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
   (interactive "P")
   (ghostel-agent-toggle-command arg))
 
+(defvar ghostel-agent--home-fullscreen-views nil
+  "Alist mapping agent symbols to their home-dir fullscreen views.")
+
+(defun ghostel-agent-home-toggle (arg)
+  "Toggle a fullscreen agent session rooted in the home directory.
+Prefix ARG follows the same convention as `ghostel-agent-toggle-command':
+plain = Claude, `C-u' = Claude resume, `C-2' = Codex, `C-3' = Codex resume.
+Pressing again restores the previous window layout."
+  (interactive "P")
+  (let* ((parsed (ghostel-agent--parse-prefix arg))
+         (agent (or (car parsed) 'claude))
+         (resume (cadr parsed))
+         (root (ghostel-agent--normalize-root "~/"))
+         (view (alist-get agent ghostel-agent--home-fullscreen-views)))
+    (cond
+     ;; Already showing this agent's home fullscreen → exit.
+     ;; Restore config directly instead of `ghostel-agent--exit-fullscreen'
+     ;; which would show the home buffer in the project sidebar.
+     ((and view
+           (buffer-live-p (plist-get view :agent))
+           (eq (current-buffer) (plist-get view :agent)))
+      (let ((config (plist-get view :config)))
+        (setq ghostel-agent--fullscreen-views
+              (delq view ghostel-agent--fullscreen-views))
+        (setf (alist-get agent ghostel-agent--home-fullscreen-views) nil)
+        (when (window-configuration-p config)
+          (set-window-configuration config))))
+     ;; Session exists → enter fullscreen.
+     ((ghostel-agent--last-session-for-agent agent root)
+      (let* ((session (ghostel-agent--last-session-for-agent agent root))
+             (buf (ghostel-agent--session-buffer session)))
+        (when (and view (buffer-live-p (plist-get view :agent)))
+          (ghostel-agent--exit-fullscreen view))
+        (ghostel-agent--enter-fullscreen buf)
+        (setf (alist-get agent ghostel-agent--home-fullscreen-views)
+              (car ghostel-agent--fullscreen-views))))
+     ;; No session → create, then fullscreen.
+     (t
+      (let* ((win (ghostel-agent--create agent root resume))
+             (buf (window-buffer win)))
+        (delete-window (ghostel-agent--sidebar-window))
+        (ghostel-agent--enter-fullscreen buf)
+        (setf (alist-get agent ghostel-agent--home-fullscreen-views)
+              (car ghostel-agent--fullscreen-views)))))))
+
 (add-hook 'ghostel-exit-functions #'ghostel-agent--after-exit)
 
 (global-set-key (kbd "s-l") #'ghostel-agent-toggle-command)
 (global-set-key (kbd "s-t") #'ghostel-agent-new-session-command)
 (global-set-key (kbd "s-<return>") #'ghostel-agent-toggle-fullscreen)
+(global-set-key (kbd "C-s-l") #'ghostel-agent-home-toggle)
 
 ;;; ghostel-agents.el ends here

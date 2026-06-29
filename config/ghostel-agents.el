@@ -2,6 +2,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
 
 (defvar ghostel-buffer-name)
 
@@ -101,6 +102,7 @@ switching project/workspace/frame the correct view (or none) is used."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "s-<left>") #'ghostel-agent-previous-session)
     (define-key map (kbd "s-<right>") #'ghostel-agent-next-session)
+    (define-key map (kbd "s-c") #'ghostel-agent-copy-clean)
     map)
   "Keymap active in managed ghostel agent session buffers.")
 
@@ -879,6 +881,87 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
   "Backward-compatible wrapper for `ghostel-agent-toggle-command'."
   (interactive "P")
   (ghostel-agent-toggle-command arg))
+
+(defconst ghostel-agent--fresh-line-re
+  "\\`[ \t]*\\(?:[-*•]\\|[0-9]+[.)]\\||\\)\\(?:[ \t]\\|\\'\\)"
+  "Line that starts a fresh logical line and must not be folded onto the
+previous one: a list item (`- ', `* ', `1. ', `2) ') or a `| ' quote line.")
+
+(defun ghostel-agent--dedent (lines)
+  "Strip the leading whitespace shared by every non-blank line in LINES."
+  (let* ((indents (delq nil
+                        (mapcar (lambda (l)
+                                  (and (string-match "[^ \t]" l)
+                                       (match-beginning 0)))
+                                lines)))
+         (common (if indents (apply #'min indents) 0)))
+    (mapcar (lambda (l) (if (>= (length l) common) (substring l common) l))
+            lines)))
+
+(defun ghostel-agent--strip-quote (line)
+  "Remove a leading `| ' quote marker from LINE, keeping any indent."
+  (if (string-match "\\`\\([ \t]*\\)|[ \t]?" line)
+      (concat (match-string 1 line) (substring line (match-end 0)))
+    line))
+
+(defun ghostel-agent--fold-lines (lines)
+  "Fold wrapped continuation LINES into one line per paragraph.
+Blank lines, list items and quote lines stay on their own line; the
+`| ' quote marker is stripped from each line."
+  (let (out current)
+    (dolist (line lines)
+      (cond
+       ((string-blank-p line)
+        (when current (push current out) (setq current nil))
+        (push "" out))
+       ((or (null current)
+            (string-match-p ghostel-agent--fresh-line-re line))
+        (when current (push current out))
+        (setq current (string-trim-right (ghostel-agent--strip-quote line))))
+       (t
+        (setq current (concat current " "
+                              (string-trim (ghostel-agent--strip-quote line)))))))
+    (when current (push current out))
+    (nreverse out)))
+
+(defun ghostel-agent--clean-text (text &optional no-join)
+  "Return TEXT cleaned of Claude console formatting.
+Strips the `⏺' response marker, the common indentation, and `| ' quote
+prefixes.  Unless NO-JOIN, folds wrapped lines within each paragraph
+\(blank lines and list items stay separate)."
+  (let* ((text (replace-regexp-in-string "⏺" " " text))
+         (lines (ghostel-agent--dedent (split-string text "\n")))
+         (lines (if no-join
+                    (mapcar #'ghostel-agent--strip-quote lines)
+                  (ghostel-agent--fold-lines lines))))
+    (string-trim (string-join lines "\n"))))
+
+(defun ghostel-agent-copy-clean (beg end &optional no-join)
+  "Copy region BEG..END to the kill ring, cleaned of Claude console formatting.
+Strips the `⏺' marker, the common indentation and `| ' quote prefixes,
+and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
+\(`C-u'), keep the original line breaks — use this for code blocks."
+  (interactive "r\nP")
+  (let ((clean (ghostel-agent--clean-text
+                (buffer-substring-no-properties beg end) no-join)))
+    (kill-new clean)
+    (deactivate-mark)
+    (when (fboundp 'ghostel-readonly-exit)
+      (ignore-errors (ghostel-readonly-exit)))
+    (message "Copied cleaned text (%d chars)%s"
+             (length clean) (if no-join " [no join]" ""))))
+
+(when (require 'ert nil t)
+  (ert-deftest ghostel-agent--clean-text-test ()
+    (should (equal (ghostel-agent--clean-text
+                    "⏺ Foo bar\n  baz qux\n\n  Next para wraps\n  onto two lines")
+                   "Foo bar baz qux\n\nNext para wraps onto two lines"))
+    (should (equal (ghostel-agent--clean-text "  | line 1\n  | line 2\n  | line 3")
+                   "line 1\nline 2\nline 3"))
+    (should (equal (ghostel-agent--clean-text
+                    "  Two reasons:\n  1. first item wraps\n  here\n  2. second")
+                   "Two reasons:\n1. first item wraps here\n2. second"))
+    (should (equal (ghostel-agent--clean-text "⏺ a\n  b" t) "a\nb"))))
 
 (defvar ghostel-agent--home-fullscreen-views nil
   "Alist mapping agent symbols to their home-dir fullscreen views.")

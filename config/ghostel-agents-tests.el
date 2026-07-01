@@ -399,6 +399,25 @@ and repoints the view at it; fullscreen stays sticky."
         (should (gat--fullscreen-now-p (plist-get s1 :buffer)))
         (should (eq (plist-get view :agent) (plist-get s1 :buffer)))))))
 
+(ert-deftest gat-win-enter-fullscreen-from-fullscreen-keeps-escapable-config ()
+  "Re-entering fullscreen while the agent already fills the frame must not
+save a self-referential config, or demoting/hiding could never reveal the
+code (the C-s-l home-toggle stuck bug)."
+  (gat-with-env
+    (let* ((root "/tmp/projA/")
+           (s (gat--register 'claude root))
+           (buf (plist-get s :buffer)))
+      (gat--show-code root)             ; window's prev-buffer becomes the code
+      (switch-to-buffer buf)
+      (delete-other-windows)
+      (should (gat--fullscreen-now-p buf))
+      (ghostel-agent--enter-fullscreen buf)
+      (let* ((view (ghostel-agent--fullscreen-view-for-root root))
+             (shown (save-window-excursion
+                      (set-window-configuration (plist-get view :config))
+                      (mapcar #'window-buffer (window-list nil 'no-minibuf)))))
+        (should-not (memq buf shown))))))
+
 (ert-deftest gat-win-enter-fullscreen-strips-side-params ()
   "Promoting the sidebar (a side window) to fullscreen strips its window-side
 parameters so the full-frame window behaves like an ordinary window."

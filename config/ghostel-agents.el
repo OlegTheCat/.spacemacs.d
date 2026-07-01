@@ -705,6 +705,18 @@ project's default session."
     (set-window-parameter win 'window-slot nil)
     (set-window-parameter win 'no-delete-other-windows nil)))
 
+(defun ghostel-agent--capture-restore-config (buf)
+  "Return the window configuration to restore when BUF's fullscreen ends.
+Normally the current layout, but if BUF already fills the frame as the sole
+window (e.g. C-s-l re-enters after the view was lost), that layout would just
+re-show BUF — dismissing it could never reveal the code.  Snapshot the
+window's previous buffer instead, so demoting/hiding returns to real content."
+  (if (and (one-window-p t) (eq (current-buffer) buf))
+      (save-window-excursion
+        (switch-to-prev-buffer (selected-window))
+        (current-window-configuration))
+    (current-window-configuration)))
+
 (defun ghostel-agent--enter-fullscreen (buf)
   "Expand agent BUF to fill the frame, registering a fullscreen view.
 The view is keyed by BUF's session root so `s-l'/`s-<return>' can find
@@ -713,7 +725,7 @@ it later even while it is hidden and point is on a code buffer."
                 (plist-get session :root))))
     (push (list :agent buf
                 :root (and root (ghostel-agent--normalize-root root))
-                :config (current-window-configuration)
+                :config (ghostel-agent--capture-restore-config buf)
                 :hidden nil)
           ghostel-agent--fullscreen-views))
   (ghostel-agent--fill-frame buf))

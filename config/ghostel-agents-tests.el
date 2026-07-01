@@ -603,4 +603,41 @@ fences the text."
   (should (equal (ghostel-agent--clean-text "⏺ code line 1\n  code line 2" t)
                  "code line 1\ncode line 2")))
 
+(ert-deftest gat-clean-text-strips-rendered-bullet ()
+  "The `●' that the render advice substitutes for `⏺' is stripped too."
+  (should (equal (ghostel-agent--clean-text "● Foo bar\n  baz qux") "Foo bar baz qux")))
+
+;;; --- quote-region (s-') ------------------------------------------------------
+
+(ert-deftest gat-quote-region-cleans-and-quotes ()
+  "Plain `s-'': clean (strip marker, fold wraps) then blockquote + blank line."
+  (gat-with-env
+    (with-temp-buffer
+      (insert "● Foo bar\n  baz qux")
+      (ghostel-agent-quote-region (point-min) (point-max)))
+    (should (equal gat--last-paste "> Foo bar baz qux\n\n"))))
+
+(ert-deftest gat-quote-region-raw-keeps-verbatim ()
+  "`C-u s-'': quote verbatim — marker kept, lines not folded."
+  (gat-with-env
+    (with-temp-buffer
+      (insert "● Foo bar\n  baz qux")
+      (ghostel-agent-quote-region (point-min) (point-max) t))
+    (should (equal gat--last-paste "> ● Foo bar\n>   baz qux\n\n"))))
+
+(ert-deftest gat-quote-region-blank-lines-become-bare-gt ()
+  "Blank lines inside the quote become `>' so it stays one blockquote."
+  (gat-with-env
+    (with-temp-buffer
+      (insert "para one\n\npara two")
+      (ghostel-agent-quote-region (point-min) (point-max)))
+    (should (equal gat--last-paste "> para one\n>\n> para two\n\n"))))
+
+(ert-deftest gat-session-mode-map-bindings ()
+  "The session keymap wires s-c (copy-clean) and s-' (quote-region)."
+  (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-c"))
+              'ghostel-agent-copy-clean))
+  (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-'"))
+              'ghostel-agent-quote-region)))
+
 ;;; ghostel-agents-tests.el ends here

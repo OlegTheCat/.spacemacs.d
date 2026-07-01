@@ -118,6 +118,7 @@ fullscreen window."
     (define-key map (kbd "s-<left>") #'ghostel-agent-previous-session)
     (define-key map (kbd "s-<right>") #'ghostel-agent-next-session)
     (define-key map (kbd "s-c") #'ghostel-agent-copy-clean)
+    (define-key map (kbd "s-'") #'ghostel-agent-quote-region)
     map)
   "Keymap active in managed ghostel agent session buffers.")
 
@@ -960,7 +961,7 @@ Blank lines, list items and quote lines stay on their own line; the
 Strips the `⏺' response marker, the common indentation, and `| ' quote
 prefixes.  Unless NO-JOIN, folds wrapped lines within each paragraph
 \(blank lines and list items stay separate)."
-  (let* ((text (replace-regexp-in-string "⏺" " " text))
+  (let* ((text (replace-regexp-in-string "[⏺●]" " " text))
          (lines (ghostel-agent--dedent (split-string text "\n")))
          (lines (if no-join
                     (mapcar #'ghostel-agent--strip-quote lines)
@@ -982,6 +983,25 @@ and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
     (message "Copied cleaned text (%d chars)%s"
              (length clean) (if no-join " [no join]" ""))))
 
+(defun ghostel-agent-quote-region (beg end &optional raw)
+  "Quote region BEG..END back into this agent's prompt as a reply.
+Prefixes each line with `> ', exits copy mode, and pastes the quote plus a
+blank line into the live prompt, leaving point below it ready for your
+message.  Normally the selected output is cleaned first (see
+`ghostel-agent--clean-text': strips the response marker and `| ' quote
+prefixes, un-wraps hard-wrapped lines).  With prefix arg RAW (`C-u'), quote
+the text verbatim and skip that cleanup — use it for code."
+  (interactive "r\nP")
+  (let* ((text (buffer-substring-no-properties beg end))
+         (source (if raw (string-trim text) (ghostel-agent--clean-text text)))
+         (quoted (mapconcat (lambda (l) (if (string-empty-p l) ">" (concat "> " l)))
+                            (split-string source "\n")
+                            "\n")))
+    (deactivate-mark)
+    (when (fboundp 'ghostel-readonly-exit)
+      (ignore-errors (ghostel-readonly-exit)))
+    (ghostel-paste-string (concat quoted "\n\n"))))
+
 (when (require 'ert nil t)
   (ert-deftest ghostel-agent--clean-text-test ()
     (should (equal (ghostel-agent--clean-text
@@ -992,7 +1012,9 @@ and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
     (should (equal (ghostel-agent--clean-text
                     "  Two reasons:\n  1. first item wraps\n  here\n  2. second")
                    "Two reasons:\n1. first item wraps here\n2. second"))
-    (should (equal (ghostel-agent--clean-text "⏺ a\n  b" t) "a\nb"))))
+    (should (equal (ghostel-agent--clean-text "⏺ a\n  b" t) "a\nb"))
+    ;; The `●' the render advice substitutes for `⏺' is stripped too.
+    (should (equal (ghostel-agent--clean-text "● Foo\n  bar") "Foo bar"))))
 
 (defun ghostel-agent--ensure-buffer (agent root resume)
   "Return AGENT's live buffer in ROOT, creating the session if needed.

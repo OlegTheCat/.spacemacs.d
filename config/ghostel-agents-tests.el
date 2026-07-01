@@ -353,6 +353,25 @@ project agent, fullscreen, with the project view intact and the home view gone."
       (should (ghostel-agent--fullscreen-view-for-root root))
       (should (gat--fullscreen-now-p bufA)))))
 
+(ert-deftest gat-win-s-l-dismisses-home-fullscreen ()
+  "A home (C-s-l) fullscreen hides with plain s-l and is dismissed (not
+sticky-hidden), so C-s-l re-fires it afterwards.  A project fullscreen still
+sticky-hides (see `gat-win-split-roundtrip-preserves-split')."
+  (gat-with-env
+    (let* ((home (ghostel-agent--normalize-root "~/"))
+           (proj "/tmp/projA/")
+           (hs (gat--register 'claude home))
+           (homebuf (plist-get hs :buffer)))
+      (gat--register 'claude proj)
+      (gat--show-code proj)
+      (ghostel-agent-home-toggle nil)               ; C-s-l → home fullscreen
+      (should (gat--fullscreen-now-p homebuf))
+      (ghostel-agent-toggle-command nil)            ; s-l → hide home
+      (should-not (get-buffer-window homebuf))       ; home no longer shown
+      (should-not (ghostel-agent--fullscreen-view-for-root home)) ; dismissed, not sticky
+      (ghostel-agent-home-toggle nil)               ; C-s-l re-fires it
+      (should (gat--fullscreen-now-p homebuf)))))
+
 (ert-deftest gat-win-exit-fullscreen-restores-splits ()
   "s-<return> twice (enter then exit) restores the pre-fullscreen splits and
 returns the agent to the sidebar (exit, unlike hide, keeps the agent shown)."

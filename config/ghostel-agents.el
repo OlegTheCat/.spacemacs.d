@@ -717,16 +717,20 @@ window's previous buffer instead, so demoting/hiding returns to real content."
         (current-window-configuration))
     (current-window-configuration)))
 
-(defun ghostel-agent--enter-fullscreen (buf)
+(defun ghostel-agent--enter-fullscreen (buf &optional dismiss)
   "Expand agent BUF to fill the frame, registering a fullscreen view.
 The view is keyed by BUF's session root so `s-l'/`s-<return>' can find
-it later even while it is hidden and point is on a code buffer."
+it later even while it is hidden and point is on a code buffer.
+When DISMISS is non-nil, hiding the view (plain `s-l') removes it outright
+instead of sticky-hiding it — used for the C-s-l home fullscreen, so `s-l'
+dismisses it and C-s-l re-fires it fresh."
   (let ((root (when-let* ((session (ghostel-agent--session-for-buffer buf)))
                 (plist-get session :root))))
     (push (list :agent buf
                 :root (and root (ghostel-agent--normalize-root root))
                 :config (ghostel-agent--capture-restore-config buf)
-                :hidden nil)
+                :hidden nil
+                :dismiss dismiss)
           ghostel-agent--fullscreen-views))
   (ghostel-agent--fill-frame buf))
 
@@ -759,12 +763,16 @@ the current splits, not the stale layout captured when fullscreen began."
       (ghostel-agent--show-session session))))
 
 (defun ghostel-agent--hide-fullscreen (view)
-  "Hide VIEW's agent, collapsing to just the code, but keep fullscreen mode.
-Restores the pre-fullscreen layout, deletes the agent's window(s), and
-marks VIEW hidden so the next `s-l' re-expands it to fullscreen.  Only
-`s-<return>' (`ghostel-agent--exit-fullscreen') leaves fullscreen mode."
+  "Hide VIEW's agent, collapsing to just the code.
+Restores the pre-fullscreen layout and deletes the agent's window(s).  A
+sticky VIEW is marked hidden so the next `s-l' re-expands it (only
+`s-<return>' leaves that mode); a `:dismiss' VIEW (the C-s-l home
+fullscreen) is removed outright so `s-l' dismisses it and C-s-l re-fires it."
   (let ((agent (plist-get view :agent)))
-    (plist-put view :hidden t)
+    (if (plist-get view :dismiss)
+        (setq ghostel-agent--fullscreen-views
+              (delq view ghostel-agent--fullscreen-views))
+      (plist-put view :hidden t))
     (when (window-configuration-p (plist-get view :config))
       (set-window-configuration (plist-get view :config)))
     (dolist (win (get-buffer-window-list agent nil nil))
@@ -1049,8 +1057,10 @@ agent from inside a project's fullscreen cannot hijack that project's view."
 Prefix ARG follows `ghostel-agent-toggle-command' conventions: plain =
 Claude, `C-u' = Claude resume, `C-2' = Codex, `C-3' = Codex resume.
 Promotes the home (~/) agent to fullscreen from any project; press again
-to restore the previous layout.  Keyed by the home root through the same
-machinery as the project fullscreen, so the two no longer collide."
+to restore the previous layout.  The home fullscreen also hides with plain
+`s-l' (it is registered `:dismiss', so `s-l' dismisses it and C-s-l re-fires
+it).  Keyed by the home root through the same machinery as the project
+fullscreen, so the two no longer collide."
   (interactive "P")
   (let* ((parsed (ghostel-agent--parse-prefix arg))
          (agent (or (car parsed) 'claude))
@@ -1070,7 +1080,7 @@ machinery as the project fullscreen, so the two no longer collide."
         (unless (buffer-live-p buf)
           (user-error "Could not start home %s session" agent))
         (ghostel-agent--remember-last-window)
-        (ghostel-agent--enter-fullscreen buf)))))
+        (ghostel-agent--enter-fullscreen buf t)))))
 
 (add-hook 'ghostel-exit-functions #'ghostel-agent--after-exit)
 

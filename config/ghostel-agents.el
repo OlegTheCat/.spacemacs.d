@@ -931,19 +931,22 @@ previous one: a list item (`- ', `* ', `1. ', `2) ') or a `| ' quote line.")
             lines)))
 
 (defun ghostel-agent--strip-quote (line)
-  "Remove a leading `| ' quote marker from LINE, keeping any indent."
-  (if (string-match "\\`\\([ \t]*\\)|[ \t]?" line)
+  "Remove a leading quote marker from LINE, keeping any indent.
+Handles the ASCII `| ' marker and the block-element bars (`▏▎▍▌') Claude
+renders on each wrapped line of a blockquote."
+  (if (string-match "\\`\\([ \t]*\\)[|▏▎▍▌][ \t]?" line)
       (concat (match-string 1 line) (substring line (match-end 0)))
     line))
 
 (defun ghostel-agent--fold-lines (lines)
   "Fold wrapped continuation LINES into one line per paragraph.
-Blank lines, list items and quote lines stay on their own line; the
-`| ' quote marker is stripped from each line."
+Blank lines, list items and `| ' quote lines stay on their own line;
+block-element quote bars (`▎', `▌', …) are stripped and their wrapped lines
+rejoined.  A bare quote bar counts as a blank paragraph break."
   (let (out current)
     (dolist (line lines)
       (cond
-       ((string-blank-p line)
+       ((string-blank-p (ghostel-agent--strip-quote line))
         (when current (push current out) (setq current nil))
         (push "" out))
        ((or (null current)
@@ -958,9 +961,10 @@ Blank lines, list items and quote lines stay on their own line; the
 
 (defun ghostel-agent--clean-text (text &optional no-join)
   "Return TEXT cleaned of Claude console formatting.
-Strips the `⏺' response marker, the common indentation, and `| ' quote
-prefixes.  Unless NO-JOIN, folds wrapped lines within each paragraph
-\(blank lines and list items stay separate)."
+Strips the `⏺'/`●' response marker, the common indentation, and quote-bar
+prefixes (ASCII `| ' and block bars like `▎').  Unless NO-JOIN, folds
+wrapped lines within each paragraph (blank lines and list items stay
+separate)."
   (let* ((text (replace-regexp-in-string "[⏺●]" " " text))
          (lines (ghostel-agent--dedent (split-string text "\n")))
          (lines (if no-join

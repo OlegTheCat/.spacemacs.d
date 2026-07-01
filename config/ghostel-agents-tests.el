@@ -607,6 +607,17 @@ fences the text."
   "The `●' that the render advice substitutes for `⏺' is stripped too."
   (should (equal (ghostel-agent--clean-text "● Foo bar\n  baz qux") "Foo bar baz qux")))
 
+(ert-deftest gat-clean-text-folds-block-bar-blockquote ()
+  "Claude's `▎' blockquote bars are stripped and wrapped lines rejoined."
+  (should (equal (ghostel-agent--clean-text
+                  "  ▎ a quoted line the terminal wrapped\n  ▎ onto a second line")
+                 "a quoted line the terminal wrapped onto a second line")))
+
+(ert-deftest gat-clean-text-block-bar-blank-line-splits-paragraphs ()
+  "A bare `▎' bar (empty quote line) stays a paragraph break, not a fold."
+  (should (equal (ghostel-agent--clean-text "▎ para one\n▎\n▎ para two")
+                 "para one\n\npara two")))
+
 ;;; --- quote-region (s-') ------------------------------------------------------
 
 (ert-deftest gat-quote-region-cleans-and-quotes ()

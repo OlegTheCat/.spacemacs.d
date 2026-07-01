@@ -437,6 +437,25 @@ code (the C-s-l home-toggle stuck bug)."
                       (mapcar #'window-buffer (window-list nil 'no-minibuf)))))
         (should-not (memq buf shown))))))
 
+(ert-deftest gat-win-fullscreen-display-strips-side-params ()
+  "Showing an agent full-frame via `--display-fullscreen-window' must strip
+window-side/slot/no-delete-other-windows, even when the selected window
+carried them (a former sidebar promoted into the full-frame role).  Only
+`--fill-frame' stripped before; the session-switch / new-session display path
+did not."
+  (gat-with-env
+    (let* ((s (gat--register 'claude "/tmp/projA/"))
+           (buf (plist-get s :buffer))
+           (win (selected-window)))
+      (set-window-parameter win 'window-side 'right)
+      (set-window-parameter win 'window-slot 0)
+      (set-window-parameter win 'no-delete-other-windows t)
+      (ghostel-agent--display-fullscreen-window buf)
+      (let ((w (selected-window)))
+        (should (null (window-parameter w 'window-side)))
+        (should (null (window-parameter w 'window-slot)))
+        (should (null (window-parameter w 'no-delete-other-windows)))))))
+
 (ert-deftest gat-win-enter-fullscreen-strips-side-params ()
   "Promoting the sidebar (a side window) to fullscreen strips its window-side
 parameters so the full-frame window behaves like an ordinary window."

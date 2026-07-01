@@ -442,6 +442,18 @@ executing the command."
              (window-width . ,ghostel-agent-width)
              (window-parameters . ((no-delete-other-windows . t))))))))
 
+(defun ghostel-agent--normalize-full-frame-window (win)
+  "Make WIN an ordinary full-frame window fit to host an agent buffer.
+Undedicate it and strip the `window-side'/`window-slot'/`no-delete-other-windows'
+parameters a former sidebar leaves behind; left in place they make Emacs refuse
+`switch-to-buffer' and can trap the agent in a phantom side slot.  Returns WIN."
+  (when (window-live-p win)
+    (set-window-dedicated-p win nil)
+    (set-window-parameter win 'window-side nil)
+    (set-window-parameter win 'window-slot nil)
+    (set-window-parameter win 'no-delete-other-windows nil))
+  win)
+
 (defun ghostel-agent--display-fullscreen-window (buf &optional view)
   "Display agent BUF in the current full-frame window and return it.
 Repoints VIEW's agent side to BUF (defaulting to the view in the
@@ -451,7 +463,7 @@ selected window) so creating or switching sessions stays fullscreen."
   (let ((win (selected-window)))
     (set-window-dedicated-p win nil)
     (set-window-buffer win buf)
-    win))
+    (ghostel-agent--normalize-full-frame-window win)))
 
 (defun ghostel-agent--display-buffer-in-sidebar (buf _alist)
   "Display BUF for `display-buffer'.
@@ -696,14 +708,10 @@ project's default session."
   ;; other side windows) collapse too, giving a truly full-frame buffer.
   (let ((ignore-window-parameters t))
     (delete-other-windows))
-  ;; If we promoted the sidebar (a side window) it keeps its side-window
-  ;; parameters, which makes Emacs refuse `switch-to-buffer' here.  Strip
-  ;; them so the full-frame window behaves like an ordinary window; exit
-  ;; restores the real sidebar from the saved configuration regardless.
-  (let ((win (selected-window)))
-    (set-window-parameter win 'window-side nil)
-    (set-window-parameter win 'window-slot nil)
-    (set-window-parameter win 'no-delete-other-windows nil)))
+  ;; A promoted sidebar keeps its side-window parameters, which make Emacs
+  ;; refuse `switch-to-buffer'; normalize so the full-frame window behaves like
+  ;; an ordinary one (exit restores the real sidebar from the saved config).
+  (ghostel-agent--normalize-full-frame-window (selected-window)))
 
 (defun ghostel-agent--capture-restore-config (buf)
   "Return the window configuration to restore when BUF's fullscreen ends.

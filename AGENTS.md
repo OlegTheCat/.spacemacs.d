@@ -23,3 +23,12 @@
 2. Create configuration in `config/*.el`
 3. Add the filename to the `dolist` in `dotspacemacs/user-config`
 4. Load the new config file: `emacsclient --eval '(load ...)'`
+
+### Running tests
+
+Tests are [ERT](https://www.gnu.org/software/emacs/manual/html_node/ert/) and run headless — no live Emacs needed:
+
+- `./run-tests.sh` — run everything
+- `./run-tests.sh "gat-win-.*"` — run a subset (arg is an ERT selector regexp)
+
+Tests live in `config/<name>-tests.el` and are **not** added to the `user-config` `dolist` (so they never load at startup). `run-tests.sh` loads the module under test plus its `-tests.el`; add `-l config/…` lines there when covering a new module.

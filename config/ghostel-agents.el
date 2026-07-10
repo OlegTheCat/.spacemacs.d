@@ -573,16 +573,25 @@ current full-frame window so switching sessions stays fullscreen."
       (let ((buf (ghostel-agent--session-buffer session)))
         (set-window-dedicated-p win nil)
         (set-window-buffer win buf)
-        (ghostel-agent--finish-sidebar-window win))
+        ;; Only a real sidebar gets sidebar finishing; dedicating an exited
+        ;; fullscreen agent's sole window would wedge the frame.
+        (when (ghostel-agent--sidebar-window-p win)
+          (ghostel-agent--finish-sidebar-window win))
+        win)
     (ghostel-agent--show-session session)))
 
 (defun ghostel-agent--after-exit (buf _event)
-  "Keep the sidebar open on BUF exit when another session is live."
+  "Keep BUF's window on the next live session when BUF's agent exits."
   (when-let* ((session (ghostel-agent--session-for-buffer buf)))
     (let ((root (plist-get session :root))
           (win (get-buffer-window buf t))
-          (next (ghostel-agent--previous-session session)))
+          (next (ghostel-agent--previous-session session))
+          (view (ghostel-agent--fullscreen-view-for-agent buf)))
       (when next
+        ;; Exiting while fullscreen: repoint the view at the successor so
+        ;; fullscreen mode survives instead of dying with the killed buffer.
+        (when view
+          (plist-put view :agent (ghostel-agent--session-buffer next)))
         (ghostel-agent--show-session-in-window next win))
       (run-at-time 0 nil
                    (lambda (root)
@@ -721,7 +730,9 @@ re-show BUF — dismissing it could never reveal the code.  Snapshot the
 window's previous buffer instead, so demoting/hiding returns to real content."
   (if (and (one-window-p t) (eq (current-buffer) buf))
       (save-window-excursion
-        (switch-to-prev-buffer (selected-window))
+        (let ((win (selected-window)))
+          (set-window-dedicated-p win nil)
+          (switch-to-prev-buffer win))
         (current-window-configuration))
     (current-window-configuration)))
 

@@ -420,8 +420,9 @@ and repoints the view at it; fullscreen stays sticky."
 
 (ert-deftest gat-win-enter-fullscreen-from-fullscreen-keeps-escapable-config ()
   "Re-entering fullscreen while the agent already fills the frame must not
-save a self-referential config, or demoting/hiding could never reveal the
-code (the C-s-l home-toggle stuck bug)."
+save a self-referential config, even when the sole agent window is dedicated,
+or demoting/hiding could never reveal the code (the C-s-l home-toggle stuck
+bug)."
   (gat-with-env
     (let* ((root "/tmp/projA/")
            (s (gat--register 'claude root))
@@ -429,8 +430,11 @@ code (the C-s-l home-toggle stuck bug)."
       (gat--show-code root)             ; window's prev-buffer becomes the code
       (switch-to-buffer buf)
       (delete-other-windows)
+      (set-window-dedicated-p (selected-window) t)
       (should (gat--fullscreen-now-p buf))
+      (should (window-dedicated-p (selected-window)))
       (ghostel-agent--enter-fullscreen buf)
+      (should-not (window-dedicated-p (selected-window)))
       (let* ((view (ghostel-agent--fullscreen-view-for-root root))
              (shown (save-window-excursion
                       (set-window-configuration (plist-get view :config))
@@ -636,6 +640,51 @@ fences the text."
       (let ((w (ghostel-agent--sidebar-window)))
         (should w)
         (should (eq (window-buffer w) (plist-get a1 :buffer)))))))
+
+(ert-deftest gat-win-after-exit-in-fullscreen-not-dedicated ()
+  "Exit while fullscreen must not sidebar-dedicate the full-frame window.
+`--after-exit' reuses the dead agent's window for the successor session;
+blindly applying sidebar finishing left the frame's sole window strongly
+dedicated (the C-s-l stuck dedicated window bug)."
+  (gat-with-env
+    (let* ((root "/tmp/projA/")
+           (s1 (gat--register 'claude root))
+           (s2 (gat--register 'claude root)))
+      (gat--show-code root)
+      (ghostel-agent--select-session s2)
+      (ghostel-agent-toggle-command nil)            ; show s2 sidebar
+      (ghostel-agent-toggle-fullscreen)             ; s2 fullscreen
+      (let ((buf2 (plist-get s2 :buffer)))
+        (ghostel-agent--after-exit buf2 nil)        ; s2's shell dies...
+        (kill-buffer buf2))                         ; ...and ghostel kills it
+      (let ((win (selected-window)))
+        (should (eq (window-buffer win) (plist-get s1 :buffer)))
+        (should-not (window-dedicated-p win))))))
+
+(ert-deftest gat-win-after-exit-in-fullscreen-stays-removable ()
+  "Exit while fullscreen repoints the view at the successor session, so
+fullscreen mode survives and plain s-l still hides the agent instead of
+erroring on a sole window."
+  (gat-with-env
+    (let* ((root "/tmp/projA/")
+           (s1 (gat--register 'claude root))
+           (s2 (gat--register 'claude root)))
+      (gat--show-code root)
+      (ghostel-agent--select-session s2)
+      (ghostel-agent-toggle-command nil)            ; show s2 sidebar
+      (ghostel-agent-toggle-fullscreen)             ; s2 fullscreen
+      (let ((buf2 (plist-get s2 :buffer)))
+        (ghostel-agent--after-exit buf2 nil)
+        (kill-buffer buf2))
+      ;; Killing the current buffer leaves *scratch* current in batch; the
+      ;; interactive command loop would sync to the shown buffer before s-l.
+      (set-buffer (window-buffer (selected-window)))
+      (let ((view (ghostel-agent--fullscreen-view-for-root root)))
+        (should view)
+        (should (eq (plist-get view :agent) (plist-get s1 :buffer)))
+        (ghostel-agent-toggle-command nil)          ; s-l → hide, not error
+        (should (plist-get view :hidden))
+        (should-not (get-buffer-window (plist-get s1 :buffer)))))))
 
 (ert-deftest gat-win-cycle-skips-dead-buffer ()
   (gat-with-env

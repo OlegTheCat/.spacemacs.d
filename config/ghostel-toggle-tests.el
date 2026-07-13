@@ -788,6 +788,86 @@ layout and end with the session only in its panel — not once per pane."
             (should (= (length wins) 1))          ; session shows exactly once
             (should (ghostel-toggle--panel-window-p (car wins) 'terminal))))))))
 
+(ert-deftest gtl-fs-create-failure-keeps-view ()
+  "A failed session creation while fullscreen must not strand the view on
+the dead candidate buffer: the view keeps its old buffer (repointing
+happens only after registration) and the flip still recovers it."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (s (gtt--register root))
+           (buf (plist-get s :buffer)))
+      (gt--show-code root)
+      (ghostel-toggle--enter-fullscreen buf)
+      (with-current-buffer buf
+        (cl-letf (((symbol-function 'ghostel)
+                   (lambda (&rest _)
+                     ;; Mirror ghostel--create's failure path: display the
+                     ;; candidate, fail the spawn, kill it, resignal.
+                     (let ((cand (gt--fake-buffer)))
+                       (display-buffer cand)
+                       (kill-buffer cand)
+                       (error "spawn failed")))))
+          (should-error (ghostel-toggle-create-session 'terminal root))))
+      (let ((view (ghostel-toggle--view-for-root 'terminal root)))
+        (should view)
+        (should (eq (plist-get view :buffer) buf))
+        (ghostel-toggle--show-fullscreen view)
+        (should (gt--fullscreen-now-p buf))))))
+
+(ert-deftest gtl-fs-restored-panel-stays-recognized ()
+  "A panel window resurrected by a config restore keeps its kind param.
+Promotion reuses and normalizes the panel window; without persisting the
+parameter the restored drawer is an anonymous side window that the next
+toggle re-tags instead of hiding."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root)))
+      (gt--show-code root)
+      (ghostel-toggle--select-session t1)
+      (ghostel-terminal-toggle)                   ; drawer on t1, focused
+      (ghostel-toggle-fullscreen-command)         ; promote (reuses drawer win)
+      (ghostel-toggle--show-session t2)           ; switch tabs in fullscreen
+      (set-buffer (window-buffer (selected-window)))
+      (ghostel-terminal-toggle)                   ; s-i → hide, restore drawer
+      (let ((w (ghostel-toggle--panel-window 'terminal)))
+        (should w)
+        (should (eq (window-buffer w) (plist-get t1 :buffer)))
+        (should (ghostel-toggle--root-visible-p 'terminal root))))))
+
+(ert-deftest gtl-fs-promotion-clears-preserved-size ()
+  "A session promoted from its panel must not keep the panel's preserved
+size, or splitting the fullscreen pins the session pane to drawer height."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (gt--show-code root)
+      (ghostel-terminal-toggle)                   ; drawer preserves its height
+      (should (window-parameter (selected-window) 'window-preserved-size))
+      (ghostel-toggle-fullscreen-command)         ; promote reuses the window
+      (let ((p (window-parameter (selected-window) 'window-preserved-size)))
+        (should-not (or (nth 1 p) (nth 2 p)))))))
+
+(ert-deftest gtl-fs-reexpand-selects-view-session ()
+  "Re-expanding a hidden view selects its session, so cycling starts from
+the tab on screen, not from whichever session was selected in the panel
+while the view was hidden."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root))
+           (buf1 (plist-get t1 :buffer)))
+      (gt--show-code root)
+      (ghostel-toggle--select-session t1)
+      (with-current-buffer buf1
+        (ghostel-toggle--enter-fullscreen buf1))
+      (ghostel-toggle--hide-fullscreen
+       (ghostel-toggle--view-for-root 'terminal root))
+      (ghostel-toggle--show-session t2)           ; drawer work moves selection
+      (should (eq (ghostel-toggle--selected-session 'terminal root) t2))
+      (ghostel-toggle--show-fullscreen
+       (ghostel-toggle--view-for-root 'terminal root))
+      (should (eq (ghostel-toggle--selected-session 'terminal root) t1)))))
+
 ;;; ============================================================================
 ;;; D. gta- — agents instantiation
 ;;; ============================================================================

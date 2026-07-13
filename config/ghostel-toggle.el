@@ -291,6 +291,15 @@ When ROOT is non-nil, refresh only sessions in that project."
 
 ;;; Panel (side) windows
 
+;; Window configurations don't record window parameters by default, so a
+;; snapshot restored after the panel window was normalized (fullscreen
+;; promotion reuses it as the full-frame window and strips its
+;; parameters) would resurrect the panel as an anonymous, unprotected
+;; side window that `--panel-window-p' no longer recognizes.  Persist
+;; the parameters that make a panel a panel.
+(dolist (param '(ghostel-toggle-kind no-delete-other-windows))
+  (setf (alist-get param window-persistent-parameters) t))
+
 (defun ghostel-toggle--panel-window-p (win kind)
   "Return non-nil when WIN is KIND's panel window."
   (and (window-live-p win)
@@ -453,17 +462,21 @@ nesting bookkeeping, not for display routing."
 
 (defun ghostel-toggle--normalize-full-frame-window (win)
   "Make WIN an ordinary full-frame window fit to host a session buffer.
-Undedicate it and strip the `window-side'/`window-slot'/
+Undedicate it, strip the `window-side'/`window-slot'/
 `no-delete-other-windows'/`ghostel-toggle-kind' parameters a former
-panel leaves behind; left in place they make Emacs refuse
-`switch-to-buffer', can trap the session in a phantom side slot, and
-keep the full-frame window answering as the panel window.  Returns WIN."
+panel leaves behind, and drop its preserved size; left in place they
+make Emacs refuse `switch-to-buffer', can trap the session in a phantom
+side slot, keep the full-frame window answering as the panel window,
+and pin the promoted pane to the drawer's height when the user splits
+the fullscreen.  Returns WIN."
   (when (window-live-p win)
     (set-window-dedicated-p win nil)
     (set-window-parameter win 'window-side nil)
     (set-window-parameter win 'window-slot nil)
     (set-window-parameter win 'no-delete-other-windows nil)
-    (set-window-parameter win 'ghostel-toggle-kind nil))
+    (set-window-parameter win 'ghostel-toggle-kind nil)
+    (window-preserve-size win t nil)
+    (window-preserve-size win nil nil))
   win)
 
 (defun ghostel-toggle--display-fullscreen-window (buf &optional view)
@@ -552,6 +565,11 @@ when unwinding."
         (covering (ghostel-toggle--shown-view)))
     (unless (buffer-live-p buf)
       (user-error "Fullscreen session buffer is no longer live"))
+    ;; The view's session becomes the displayed one; select it so cycling
+    ;; starts from the tab on screen, not from whichever session was
+    ;; selected in the panel while the view was hidden.
+    (when-let* ((session (ghostel-toggle--session-for-buffer buf)))
+      (ghostel-toggle--select-session session))
     (cond
      ((and covering (not (eq covering view)))
       ;; Restack: unlink from the old stack position, push on top.
@@ -823,8 +841,13 @@ panel window of `ghostel-toggle--display-kind'."
                (with-current-buffer buffer
                  (derived-mode-p 'ghostel-mode)))
       (if ghostel-toggle--fullscreen-display
-          (ghostel-toggle--display-fullscreen-window
-           buffer ghostel-toggle--fullscreen-display)
+          ;; Display only — no view arg, and the buffer isn't registered
+          ;; yet, so the view is not repointed here.  Creation can still
+          ;; fail after display (ghostel kills the buffer and resignals);
+          ;; `ghostel-toggle-create-session' repoints the view only once
+          ;; registration succeeds, so a failed spawn can't strand the
+          ;; view on a dead buffer and lose its saved layout.
+          (ghostel-toggle--display-fullscreen-window buffer)
         (ghostel-toggle--display-panel-window
          ghostel-toggle--display-kind buffer)))))
 
@@ -853,6 +876,10 @@ buffer after registration and display (e.g. to type an agent command)."
                                                     :extra extra
                                                     :id id))
     (ghostel-toggle--select-session session)
+    ;; Creation succeeded — now the fullscreen view may take over the
+    ;; new buffer (the display callback above deliberately did not).
+    (when fs-view
+      (plist-put fs-view :buffer buf))
     (let ((win (or (get-buffer-window buf t)
                    (if fs-view
                        (ghostel-toggle--display-fullscreen-window buf fs-view)

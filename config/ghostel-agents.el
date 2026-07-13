@@ -162,7 +162,7 @@ HIDDEN is non-nil, create without touching the current window layout."
      ;; Fullscreen → show this (prefix-targeted) session in the frame.
      ;; Plain `s-l' is intercepted earlier to flip; this only runs for
      ;; prefixed `s-l' (e.g. `C-2 s-l').
-     ((ghostel-toggle--current-fullscreen-view 'agent)
+     ((ghostel-toggle--current-fullscreen-view 'agent (plist-get session :root))
       (ghostel-toggle--show-session session))
      ;; Visible + focused → hide
      ((and win in-sidebar)

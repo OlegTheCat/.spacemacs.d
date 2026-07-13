@@ -434,11 +434,11 @@ fullscreen window."
       (gt--show-code root)
       (ghostel-toggle--enter-fullscreen buf)
       (with-current-buffer buf
-        (should (ghostel-toggle--current-fullscreen-view 'terminal))
+        (should (ghostel-toggle--current-fullscreen-view 'terminal root))
         (plist-put (ghostel-toggle--view-for-root 'terminal root) :hidden t)
-        (should (null (ghostel-toggle--current-fullscreen-view 'terminal))))
+        (should (null (ghostel-toggle--current-fullscreen-view 'terminal root))))
       (with-current-buffer (gt--code-buffer root)
-        (should (null (ghostel-toggle--current-fullscreen-view 'terminal)))))))
+        (should (null (ghostel-toggle--current-fullscreen-view 'terminal root)))))))
 
 (ert-deftest gtl-fs-current-view-filters-kind ()
   "A shown terminal fullscreen is never the agent's current fullscreen."
@@ -448,8 +448,21 @@ fullscreen window."
            (buf (plist-get s :buffer)))
       (gt--show-code root)
       (ghostel-toggle--enter-fullscreen buf)
-      (should (ghostel-toggle--current-fullscreen-view 'terminal))
-      (should-not (ghostel-toggle--current-fullscreen-view 'agent)))))
+      (should (ghostel-toggle--current-fullscreen-view 'terminal root))
+      (should-not (ghostel-toggle--current-fullscreen-view 'agent root)))))
+
+(ert-deftest gtl-fs-current-view-filters-root ()
+  "A shown fullscreen for one root is never another root's current view —
+reusing its window would repoint the view's buffer across projects."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (s (gtt--register root))
+           (buf (plist-get s :buffer)))
+      (gt--show-code root)
+      (ghostel-toggle--enter-fullscreen buf)
+      (should (ghostel-toggle--current-fullscreen-view 'terminal root))
+      (should-not (ghostel-toggle--current-fullscreen-view
+                   'terminal "/tmp/projB/")))))
 
 (ert-deftest gtl-fs-view-for-root-filters-kind ()
   (gt-with-env
@@ -650,6 +663,130 @@ the saved layout instead of stranding the frame on a fallback buffer."
         (should-not ghostel-toggle--fullscreen-views)
         (should (= (gt--win-count) 2))            ; the split is back
         (should (get-buffer-window code-buf))))))
+
+(ert-deftest gtl-fs-reshow-from-side-window-keeps-config ()
+  "Re-expanding a fullscreen from a panel punched over it must not
+re-snapshot :config — the snapshot would capture the view's own
+full-frame buffer, and the next hide would lose the real layout."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (let ((code1 (gt--show-code root)))
+        (split-window-right)
+        (other-window 1)
+        (let ((code2 (gt--show-code root)))
+          (ghostel-terminal-toggle)               ; drawer (creates terminal)
+          (ghostel-toggle-fullscreen-command)     ; terminal fullscreen
+          (let ((view (ghostel-toggle--view-for-root 'terminal root))
+                (drawer (gt--fake-buffer)))
+            ;; A sibling panel punched over the fullscreen, point inside it.
+            (select-window
+             (display-buffer-in-side-window drawer '((side . right))))
+            (ghostel-toggle--show-fullscreen view) ; plain-key re-expand
+            (should (gt--fullscreen-now-p (plist-get view :buffer)))
+            (ghostel-toggle--hide-fullscreen view)
+            (should (get-buffer-window code1))    ; both code panes survive
+            (should (get-buffer-window code2))
+            (should-not (get-buffer-window (plist-get view :buffer)))))))))
+
+(ert-deftest gtl-fs-reshow-from-own-panel-refreshes-config ()
+  "Re-expanding a hidden view while point is on its session buffer in the
+panel must re-snapshot :config, so hiding returns to the current splits
+rather than the layout captured before they existed."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (let ((code1 (gt--show-code root)))
+        (ghostel-terminal-toggle)                 ; drawer (creates terminal)
+        (ghostel-toggle-fullscreen-command)       ; promote
+        (let* ((view (ghostel-toggle--view-for-root 'terminal root))
+               (buf (plist-get view :buffer)))
+          (ghostel-terminal-toggle)               ; hide (sticky) → code1 alone
+          (split-window-right)                    ; the layout changes...
+          (other-window 1)
+          (let ((code2 (gt--show-code root)))
+            (ghostel-toggle--show-session-by-id   ; ...session back via tab path
+             (gt--id (ghostel-toggle--session-for-buffer buf)))
+            (ghostel-terminal-toggle)             ; s-i in panel → re-expand
+            (should (gt--fullscreen-now-p buf))
+            (ghostel-terminal-toggle)             ; s-i → hide
+            (should (get-buffer-window code1))    ; the new split is restored
+            (should (get-buffer-window code2))
+            (should-not (get-buffer-window buf))))))))
+
+(ert-deftest gtl-fs-show-session-other-root-goes-to-panel ()
+  "Showing a same-kind session of another root while a fullscreen is
+focused must use the panel, never reuse (and repoint) the shown view."
+  (gt-with-env
+    (let* ((root-a "/tmp/projA/")
+           (root-b "/tmp/projB/")
+           (sa (gtt--register root-a))
+           (sb (gtt--register root-b))
+           (abuf (plist-get sa :buffer)))
+      (gt--show-code root-a)
+      (ghostel-toggle--enter-fullscreen abuf)     ; root A terminal fullscreen
+      (with-current-buffer abuf
+        (ghostel-toggle--show-session sb))        ; root B session shown
+      (let ((va (ghostel-toggle--view-for-root 'terminal root-a)))
+        (should (eq (plist-get va :buffer) abuf)) ; A's view untouched
+        (should (eq (window-buffer (window-main-window)) abuf))
+        (should (gt--panel-shows-session-p 'terminal))
+        ;; Promote B over A and demote it again: A must survive intact.
+        (select-window (ghostel-toggle--panel-window 'terminal))
+        (ghostel-toggle-fullscreen-command)       ; B fullscreen over A
+        (ghostel-toggle-fullscreen-command)       ; demote B
+        (should-not (ghostel-toggle--view-for-root 'terminal root-b))
+        (should (eq (plist-get va :buffer) abuf))
+        (should (eq (window-buffer (window-main-window)) abuf))))))
+
+(ert-deftest gtl-fs-rebase-all-children-prevents-under-cycle ()
+  "Removing or restacking a view rebases every view under-linked to it.
+Rebasing only the first (a hidden sibling) leaves the visible one
+pointing back, forming an :under cycle that unwinds to stale layouts."
+  (gt-with-env
+    (let* ((sa (gtt--register "/tmp/projA/"))
+           (sb (gtt--register "/tmp/projB/"))
+           (sc (gtt--register "/tmp/projC/"))
+           (abuf (plist-get sa :buffer))
+           (code (gt--show-code "/tmp/projA/")))
+      (ghostel-toggle--enter-fullscreen abuf)                   ; A
+      (ghostel-toggle--enter-fullscreen (plist-get sb :buffer)) ; B over A
+      (let ((va (ghostel-toggle--view-for-root 'terminal "/tmp/projA/"))
+            (vb (ghostel-toggle--view-for-root 'terminal "/tmp/projB/")))
+        (ghostel-toggle--hide-fullscreen vb)                    ; reveal A
+        (ghostel-toggle--enter-fullscreen (plist-get sc :buffer)) ; C over A
+        (let ((vc (ghostel-toggle--view-for-root 'terminal "/tmp/projC/")))
+          (ghostel-toggle--hide-fullscreen vc))                 ; reveal A
+        (ghostel-toggle--show-fullscreen vb)                    ; B on top
+        (ghostel-toggle--show-fullscreen va)                    ; A over B
+        ;; A→B, and B must have been rebased off A — not left as A's
+        ;; child, which would make :under mutually circular.
+        (should (eq (plist-get va :under) vb))
+        (should-not (eq (plist-get vb :under) va))
+        ;; The stack unwinds to the real layout.
+        (ghostel-toggle--hide-fullscreen va)
+        (should (gt--fullscreen-now-p (plist-get vb :buffer)))
+        (ghostel-toggle--hide-fullscreen vb)
+        (should (get-buffer-window code))
+        (dolist (s (list sa sb sc))
+          (should-not (get-buffer-window (plist-get s :buffer))))))))
+
+(ert-deftest gtl-fs-demote-from-split-restores-layout ()
+  "s-<return> on a fullscreen the user split must still restore the saved
+layout and end with the session only in its panel — not once per pane."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (let ((code0 (gt--show-code root)))
+        (ghostel-terminal-toggle)                 ; drawer (creates terminal)
+        (ghostel-toggle-fullscreen-command)       ; promote
+        (let ((buf (current-buffer)))
+          (select-window (split-window-below))    ; user splits the fullscreen
+          (gt--show-code root)                    ; code in the new pane
+          (select-window (get-buffer-window buf)) ; focus the session pane
+          (ghostel-toggle-fullscreen-command)     ; demote
+          (should-not (ghostel-toggle--view-for-root 'terminal root))
+          (should (get-buffer-window code0))      ; original layout is back
+          (let ((wins (get-buffer-window-list buf)))
+            (should (= (length wins) 1))          ; session shows exactly once
+            (should (ghostel-toggle--panel-window-p (car wins) 'terminal))))))))
 
 ;;; ============================================================================
 ;;; D. gta- — agents instantiation
@@ -1411,9 +1548,8 @@ session — the other kind is invisible to cycling and after-exit."
           (should-not (string-match-p "Claude" line)))))))
 
 (ert-deftest gtx-terminal-death-under-agent-fullscreen-keeps-view ()
-  "An invisible terminal dying while the agent is fullscreen pops the drawer
-with its successor (faithful port of today's behavior) but never touches the
-agent's view."
+  "An invisible terminal dying while the agent is fullscreen selects its
+successor without popping the drawer, and never touches the agent's view."
   (gt-with-env
     (let* ((root "/tmp/projA/")
            (t1 (gtt--register root))
@@ -1428,9 +1564,30 @@ agent's view."
         (should view)
         (should (eq (plist-get view :buffer) abuf))
         (should-not (plist-get view :hidden)))
-      (let ((w (ghostel-toggle--panel-window 'terminal)))
-        (should w)
-        (should (eq (window-buffer w) (plist-get t1 :buffer)))))))
+      (should (gt--fullscreen-now-p abuf))          ; layout untouched
+      (should-not (ghostel-toggle--panel-window 'terminal))
+      (should (eq (ghostel-toggle--selected-session 'terminal root) t1)))))
+
+(ert-deftest gtx-invisible-death-leaves-focused-same-kind-fullscreen-alone ()
+  "An invisible terminal of another root dying with a successor while the
+home terminal fullscreen is focused must not hijack it: the home view keeps
+its buffer, the frame is untouched, and only the selection moves on."
+  (gt-with-env
+    (let* ((home (ghostel-toggle--normalize-root "~/"))
+           (root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root))
+           (ht (gtt--register home))
+           (htbuf (plist-get ht :buffer)))
+      (gt--show-code root)
+      (ghostel-terminal-home-toggle)                ; home terminal fullscreen
+      (should (gt--fullscreen-now-p htbuf))
+      (ghostel-toggle--after-exit (plist-get t2 :buffer) nil)
+      (should (gt--fullscreen-now-p htbuf))         ; not hijacked
+      (should (eq (plist-get (ghostel-toggle--view-for-root 'terminal home)
+                             :buffer)
+                  htbuf))
+      (should (eq (ghostel-toggle--selected-session 'terminal root) t1)))))
 
 (ert-deftest gtx-agent-death-repoints-only-agent-view ()
   "With both kinds holding views in one root, an agent exit repoints only

@@ -1608,10 +1608,11 @@ independently."
       (should-not (get-buffer-window habuf))
       (should-not (get-buffer-window htbuf)))))
 
-(ert-deftest gtx-home-demote-out-of-order-rebases ()
-  "Demoting a home fullscreen buried under the other kind's home fullscreen
-must not restore its stale layout: the visible view stays put and inherits
-the removed view's snapshot, so unwinding it skips the dead view."
+(ert-deftest gtx-home-toggles-flip-with-single-press ()
+  "With both home fullscreens up, each home key brings its own session
+back on top with a single press (a buried home view flips, it is not
+dismissed invisibly), and demoting from the top unwinds through the
+stack to the original layout."
   (gt-with-env
     (let* ((home (ghostel-toggle--normalize-root "~/"))
            (ha (gta--register 'claude home))
@@ -1619,16 +1620,45 @@ the removed view's snapshot, so unwinding it skips the dead view."
            (habuf (plist-get ha :buffer))
            (htbuf (plist-get ht :buffer))
            (code (gt--show-code "/tmp/projA/")))
+      (ghostel-terminal-home-toggle)              ; C-s-i → home terminal
+      (ghostel-agent-home-toggle nil)             ; C-s-l → home agent on top
+      (should (gt--fullscreen-now-p habuf))
+      (ghostel-terminal-home-toggle)              ; ONE C-s-i → terminal back
+      (should (gt--fullscreen-now-p htbuf))
+      (should (ghostel-toggle--view-for-root 'terminal home))
+      (ghostel-agent-home-toggle nil)             ; ONE C-s-l → agent back
+      (should (gt--fullscreen-now-p habuf))
+      ;; unwind: demote the top agent reveals the terminal beneath, then
+      ;; demoting the terminal restores the original layout
+      (ghostel-agent-home-toggle nil)
+      (should-not (ghostel-toggle--view-for-root 'agent home))
+      (should (gt--fullscreen-now-p htbuf))
+      (ghostel-terminal-home-toggle)
+      (should-not (ghostel-toggle--view-for-root 'terminal home))
+      (should (get-buffer-window code))
+      (should-not (get-buffer-window habuf))
+      (should-not (get-buffer-window htbuf)))))
+
+(ert-deftest gtx-kill-buried-fullscreen-rebases ()
+  "A fullscreen session dying while covered by another leaves the visible
+one untouched and rebases it, so demoting it later returns to the real
+layout instead of resurrecting the dead session's buffer."
+  (gt-with-env
+    (let* ((home (ghostel-toggle--normalize-root "~/"))
+           (ha (gta--register 'claude home))
+           (ht (gtt--register home))
+           (habuf (plist-get ha :buffer))
+           (code (gt--show-code "/tmp/projA/")))
       (ghostel-agent-home-toggle nil)             ; home agent fullscreen
       (ghostel-terminal-home-toggle)              ; home terminal on top
-      (should (gt--fullscreen-now-p htbuf))
-      (ghostel-agent-home-toggle nil)             ; demote the BURIED agent
-      (should (gt--fullscreen-now-p htbuf))       ; terminal untouched
+      (ghostel-toggle--after-exit habuf nil)      ; buried agent dies...
+      (kill-buffer habuf)                         ; ...and is killed
+      (should (gt--fullscreen-now-p (plist-get ht :buffer)))
       (should-not (ghostel-toggle--view-for-root 'agent home))
       (ghostel-terminal-home-toggle)              ; demote the terminal
       (should-not (ghostel-toggle--view-for-root 'terminal home))
-      (should-not (get-buffer-window habuf))      ; no resurrected agent
-      (should (get-buffer-window code)))))        ; the original layout
+      (should (get-buffer-window code))
+      (ignore ha))))
 
 (ert-deftest gtx-s-l-in-terminal-buffer-targets-agent-of-same-root ()
   (gt-with-env

@@ -1,60 +1,63 @@
-;;; ghostel-toggle.el --- Project Ghostel terminal toggle -*- lexical-binding: t -*-
+;;; ghostel-toggle.el --- Generic ghostel panel session library -*- lexical-binding: t -*-
+
+;; The shared machinery behind the project panels built on ghostel terminals:
+;; the agent sidebar (`ghostel-agents.el') and the terminal drawer
+;; (`ghostel-terminals.el').  Each panel family is a KIND registered with
+;; `ghostel-toggle-define-kind'; sessions, selection, the side window, the
+;; tab line, and the fullscreen state machine are all keyed by kind so the
+;; two families never cross-talk: the drawer can never surface an agent and
+;; the sidebar can never surface a terminal.
 
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
 
 (defvar ghostel-buffer-name)
 
+;;; Kind registry
+
+(defvar ghostel-toggle--kinds nil
+  "Alist mapping kind symbols to kind config plists.
+Config keys: `:side' (side window side), `:size' (fraction of the frame),
+`:minor-mode' (the instantiation's minor mode symbol), `:on-select'
+(optional function called with the session on every select).")
+
+(defun ghostel-toggle-define-kind (kind &rest config)
+  "Register panel KIND with CONFIG.  Re-registration replaces."
+  (setf (alist-get kind ghostel-toggle--kinds) config)
+  kind)
+
+(defun ghostel-toggle--kind-get (kind prop)
+  "Return PROP from KIND's config."
+  (plist-get (alist-get kind ghostel-toggle--kinds) prop))
+
+;;; Session registry
+
 (defvar ghostel-toggle--sessions nil
-  "Alist mapping Ghostel terminal session ids to session plists.")
+  "Alist mapping session ids to session plists.
+Session plists carry :id :kind :root :buffer :label :created-at
+:last-selected plus any extra keys the instantiation registered.  The
+registry stores the same plist object handed to callers — mutation via
+`plist-put' is the contract, so every mutable key exists from
+construction and lookups never copy.")
 
 (defvar ghostel-toggle--selected-session-alist nil
-  "Alist mapping project-root strings to selected terminal session ids.")
+  "Alist mapping (KIND . PROJECT-ROOT) keys to selected session ids.")
 
 (defvar ghostel-toggle--session-counter 0
-  "Monotonic counter used to allocate Ghostel terminal session ids.")
+  "Monotonic counter used to allocate session ids across all kinds.")
+
+(defvar ghostel-toggle--last-window-alist nil
+  "Alist mapping kinds to the window selected before jumping to their panel.")
 
 (defvar-local ghostel-toggle--session-id nil
-  "Session id this Ghostel terminal buffer belongs to.")
+  "Session id this managed ghostel buffer belongs to.")
+
+(defvar-local ghostel-toggle--kind nil
+  "Panel kind this managed ghostel buffer belongs to.")
 
 (defvar-local ghostel-toggle--project-root nil
-  "Project root this Ghostel terminal buffer belongs to.")
-
-(defvar ghostel-toggle--last-window nil
-  "Window that was selected before jumping to the terminal drawer.")
-
-(defvar ghostel-toggle-side 'bottom
-  "Side of the frame for the terminal drawer window.")
-
-(defvar ghostel-toggle-height 0.5
-  "Height of the terminal drawer as a fraction of the frame.")
-
-(defface ghostel-toggle-tab-current
-  '((t :inherit tab-line-tab-current :weight bold :underline nil))
-  "Face for the selected Ghostel terminal tab.")
-
-(defface ghostel-toggle-tab
-  '((t :inherit tab-line-tab))
-  "Face for inactive Ghostel terminal tabs.")
-
-(set-face-attribute 'ghostel-toggle-tab-current nil
-                    :inherit 'tab-line-tab-current
-                    :weight 'bold
-                    :underline nil)
-
-(defvar ghostel-toggle-session-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "s-<left>") #'ghostel-toggle-previous-session)
-    (define-key map (kbd "s-<right>") #'ghostel-toggle-next-session)
-    (define-key map (kbd "s-t") #'ghostel-toggle-new-session)
-    map)
-  "Keymap active in managed Ghostel terminal buffers.")
-
-(define-minor-mode ghostel-toggle-session-mode
-  "Minor mode for Ghostel terminal buffers managed by `ghostel-toggle'."
-  :init-value nil
-  :lighter nil
-  :keymap ghostel-toggle-session-mode-map)
+  "Project root this managed ghostel buffer belongs to.")
 
 (defun ghostel-toggle--normalize-root (root)
   "Return ROOT as a canonical project directory string."
@@ -65,25 +68,39 @@
   (ghostel-toggle--normalize-root
    (or (and (fboundp 'projectile-project-root)
             (ignore-errors (projectile-project-root)))
-       (and (fboundp 'project-current)
-            (when-let* ((project (project-current nil)))
-              (project-root project)))
        default-directory)))
 
-(defun ghostel-toggle--buffer-name (root session-id)
-  "Return the project/session-specific Ghostel identity for ROOT."
+(defun ghostel-toggle--key (kind root)
+  "Return the selected-session key for KIND in ROOT."
+  (cons kind (ghostel-toggle--normalize-root root)))
+
+(defun ghostel-toggle--selected-id (kind root)
+  "Return the selected session id for KIND in ROOT, or nil."
+  (alist-get (ghostel-toggle--key kind root)
+             ghostel-toggle--selected-session-alist nil nil #'equal))
+
+(defun ghostel-toggle--set-selected-id (kind root id)
+  "Record ID as the selected session for KIND in ROOT."
+  (setf (alist-get (ghostel-toggle--key kind root)
+                   ghostel-toggle--selected-session-alist nil nil #'equal)
+        id))
+
+(defun ghostel-toggle--buffer-name (name root session-id)
+  "Return the project/session-specific ghostel identity for NAME in ROOT."
+  ;; Ghostel reuses buffers by `ghostel--buffer-identity', even after
+  ;; title tracking renames the visible buffer.
   (let* ((root (ghostel-toggle--normalize-root root))
          (dir (directory-file-name root))
          (project-name (file-name-nondirectory dir))
          (project-label (if (string= project-name "") "root" project-name))
          (root-hash (substring (secure-hash 'sha1 root) 0 8)))
-    (format "*ghostel-terminal:%s:%s:%s*" project-label root-hash session-id)))
+    (format "*ghostel-%s:%s:%s:%s*" name project-label root-hash session-id)))
 
-(defun ghostel-toggle--next-session-id ()
-  "Return a fresh Ghostel terminal session id."
+(defun ghostel-toggle--next-session-id (kind)
+  "Return a fresh session id for KIND."
   (setq ghostel-toggle--session-counter
         (1+ ghostel-toggle--session-counter))
-  (format "ghostel-terminal-session-%d" ghostel-toggle--session-counter))
+  (format "ghostel-%s-session-%d" kind ghostel-toggle--session-counter))
 
 (defun ghostel-toggle--session-by-id (id)
   "Return the session plist for ID, or nil."
@@ -127,95 +144,101 @@
               (eq (plist-get session :buffer) buf))
             (mapcar #'cdr ghostel-toggle--sessions)))
 
-(defun ghostel-toggle--current-root ()
-  "Return the project root for the current managed Ghostel terminal, or nil."
+(defun ghostel-toggle--current-session (&optional kind)
+  "Return the current managed session, or nil.
+When KIND is non-nil, only return a session of that kind."
   (when (derived-mode-p 'ghostel-mode)
-    (let ((root (or (when-let* ((id (bound-and-true-p ghostel-toggle--session-id))
-                                (session (ghostel-toggle--live-session-by-id id)))
+    (let ((session
+           (or (when-let* ((id ghostel-toggle--session-id))
+                 (ghostel-toggle--live-session-by-id id))
+               (ghostel-toggle--session-for-buffer (current-buffer)))))
+      (when (and session
+                 (or (null kind) (eq kind (plist-get session :kind))))
+        session))))
+
+(defun ghostel-toggle--current-root (&optional kind)
+  "Return the project root for the current managed buffer, or nil.
+When KIND is non-nil, only when the current buffer belongs to that kind."
+  (when (derived-mode-p 'ghostel-mode)
+    (let ((root (or (when-let* ((session (ghostel-toggle--current-session kind)))
                       (plist-get session :root))
-                    (bound-and-true-p ghostel-toggle--project-root))))
+                    (and (or (null kind) (eq kind ghostel-toggle--kind))
+                         ghostel-toggle--project-root))))
       (when root
         (ghostel-toggle--normalize-root root)))))
 
-(defun ghostel-toggle--current-session ()
-  "Return the current managed Ghostel terminal session, or nil."
-  (when (derived-mode-p 'ghostel-mode)
-    (or (when-let* ((id (bound-and-true-p ghostel-toggle--session-id))
-                    (session (ghostel-toggle--live-session-by-id id)))
-          session)
-        (ghostel-toggle--session-for-buffer (current-buffer)))))
-
-(defun ghostel-toggle--sessions-for-root (root)
-  "Return live terminal sessions for ROOT."
+(defun ghostel-toggle--sessions-for-root (kind root)
+  "Return live KIND sessions for ROOT."
   (let ((root (ghostel-toggle--normalize-root root)))
     (ghostel-toggle--cleanup-sessions)
     (seq-filter (lambda (session)
-                  (equal root (plist-get session :root)))
+                  (and (eq kind (plist-get session :kind))
+                       (equal root (plist-get session :root))))
                 (mapcar #'cdr ghostel-toggle--sessions))))
 
 (defun ghostel-toggle--last (items)
   "Return the last element of ITEMS."
   (car (last items)))
 
-(defun ghostel-toggle--selected-session (root)
-  "Return the selected live terminal session for ROOT, or nil."
-  (when-let* ((id (alist-get (ghostel-toggle--normalize-root root)
-                             ghostel-toggle--selected-session-alist
-                             nil nil #'equal)))
+(defun ghostel-toggle--selected-session (kind root)
+  "Return the selected live KIND session for ROOT, or nil."
+  (when-let* ((id (ghostel-toggle--selected-id kind root)))
     (ghostel-toggle--live-session-by-id id)))
 
-(defun ghostel-toggle--default-session (root)
-  "Return the default session for a plain `s-i' in ROOT, or nil."
+(defun ghostel-toggle--default-session (kind root)
+  "Return the default KIND session for a plain toggle in ROOT, or nil."
   (let ((root (ghostel-toggle--normalize-root root)))
-    (or (ghostel-toggle--selected-session root)
-        (let ((current (ghostel-toggle--current-session)))
+    (or (ghostel-toggle--selected-session kind root)
+        (let ((current (ghostel-toggle--current-session kind)))
           (when (and current
                      (equal root (plist-get current :root)))
             current))
-        (ghostel-toggle--last (ghostel-toggle--sessions-for-root root)))))
+        (ghostel-toggle--last (ghostel-toggle--sessions-for-root kind root)))))
 
-(defun ghostel-toggle--next-label (root)
-  "Return the display label for a new terminal session in ROOT."
-  (let ((labels (mapcar (lambda (session)
-                          (plist-get session :label))
-                        (ghostel-toggle--sessions-for-root root)))
-        (n 1)
-        label)
-    (while (member (setq label (if (= n 1)
-                                   "Terminal"
-                                 (format "Terminal %d" n)))
-                   labels)
-      (setq n (1+ n)))
-    label))
+(defun ghostel-toggle--default-label (kind root)
+  "Return the default display label for a new KIND session in ROOT."
+  (let* ((base (capitalize (symbol-name kind)))
+         (count (1+ (length (ghostel-toggle--sessions-for-root kind root)))))
+    (if (= count 1)
+        base
+      (format "%s %d" base count))))
 
 (defun ghostel-toggle--install-buffer-locals (session)
-  "Install Ghostel terminal buffer-local state for SESSION."
-  (when-let* ((buf (ghostel-toggle--session-buffer session)))
+  "Install managed buffer-local state for SESSION.
+Skips sessions whose kind has no registered config."
+  (when-let* ((buf (ghostel-toggle--session-buffer session))
+              (kind (plist-get session :kind))
+              (config (alist-get kind ghostel-toggle--kinds)))
     (with-current-buffer buf
       (setq ghostel-toggle--session-id (plist-get session :id)
+            ghostel-toggle--kind kind
             ghostel-toggle--project-root (plist-get session :root))
-      (ghostel-toggle-session-mode 1)
+      (when-let* ((mode (plist-get config :minor-mode)))
+        (funcall mode 1))
       (setq-local tab-line-format '(:eval (ghostel-toggle--tab-line))))))
 
-(defun ghostel-toggle--register-session (root buf &optional label id)
-  "Register BUF as a terminal session in ROOT.
-LABEL, when non-nil, overrides the generated tab label.
-ID, when non-nil, is used as the session id."
+(cl-defun ghostel-toggle--register-session (kind root buf &key label extra id)
+  "Register BUF as a KIND session in ROOT and return the session plist.
+LABEL overrides the default label; EXTRA is a plist of instantiation
+keys appended to the session; ID overrides the generated session id."
   (let* ((root (ghostel-toggle--normalize-root root))
-         (id (or id (ghostel-toggle--next-session-id)))
-         (session (list :id id
-                        :root root
-                        :buffer buf
-                        :label (or label (ghostel-toggle--next-label root))
-                        :created-at (float-time)
-                        :last-selected nil)))
+         (id (or id (ghostel-toggle--next-session-id kind)))
+         (session (append (list :id id
+                                :kind kind
+                                :root root
+                                :buffer buf
+                                :label (or label
+                                           (ghostel-toggle--default-label kind root))
+                                :created-at (float-time)
+                                :last-selected nil)
+                          extra)))
     (setq ghostel-toggle--sessions
           (append ghostel-toggle--sessions (list (cons id session))))
     (ghostel-toggle--install-buffer-locals session)
     session))
 
 (defun ghostel-toggle--refresh-tab-lines (&optional root)
-  "Refresh tab lines for managed Ghostel terminals.
+  "Refresh tab lines for managed sessions.
 When ROOT is non-nil, refresh only sessions in that project."
   (let ((root (and root (ghostel-toggle--normalize-root root))))
     (ghostel-toggle--cleanup-sessions)
@@ -226,151 +249,523 @@ When ROOT is non-nil, refresh only sessions in that project."
     (force-mode-line-update t)))
 
 (defun ghostel-toggle--select-session (session)
-  "Mark SESSION as the selected terminal session for its project."
+  "Mark SESSION as the selected session of its kind for its project."
   (when (ghostel-toggle--session-live-p session)
     (let ((id (plist-get session :id))
+          (kind (plist-get session :kind))
           (root (ghostel-toggle--normalize-root (plist-get session :root))))
       (plist-put session :root root)
-      (setf (alist-get root ghostel-toggle--selected-session-alist
-                       nil nil #'equal)
-            id)
+      (ghostel-toggle--set-selected-id kind root id)
       (plist-put session :last-selected (float-time))
       (ghostel-toggle--install-buffer-locals session)
+      (when-let* ((hook (ghostel-toggle--kind-get kind :on-select)))
+        (funcall hook session))
       (ghostel-toggle--refresh-tab-lines root)
       session)))
 
-(defun ghostel-toggle--terminal-window-p (win)
-  "Return non-nil when WIN is the Ghostel terminal drawer window."
-  (and (window-live-p win)
-       (window-parameter win 'ghostel-toggle-window)))
+(defun ghostel-toggle--previous-session (session)
+  "Return the live session before SESSION in the same kind and project."
+  (let* ((kind (plist-get session :kind))
+         (root (plist-get session :root))
+         (id (plist-get session :id))
+         (sessions (ghostel-toggle--sessions-for-root kind root))
+         (others (seq-remove (lambda (candidate)
+                               (equal id (plist-get candidate :id)))
+                             sessions))
+         (index (cl-position id sessions
+                             :key (lambda (candidate)
+                                    (plist-get candidate :id))
+                             :test #'equal)))
+    (when others
+      (if (and index (> index 0))
+          (nth (1- index) sessions)
+        (ghostel-toggle--last others)))))
 
-(defun ghostel-toggle--terminal-window ()
-  "Return the Ghostel terminal drawer window for the selected frame, or nil."
-  (seq-find #'ghostel-toggle--terminal-window-p
+;;; Panel (side) windows
+
+(defun ghostel-toggle--panel-window-p (win kind)
+  "Return non-nil when WIN is KIND's panel window."
+  (and (window-live-p win)
+       (eq (window-parameter win 'ghostel-toggle-kind) kind)))
+
+(defun ghostel-toggle--panel-window (kind)
+  "Return KIND's panel window on the selected frame, or nil."
+  (seq-find (lambda (win) (ghostel-toggle--panel-window-p win kind))
             (window-list (selected-frame) 'no-minibuf)))
 
-(defun ghostel-toggle--remember-last-window ()
-  "Remember the current non-terminal-drawer window."
-  (unless (ghostel-toggle--terminal-window-p (selected-window))
-    (setq ghostel-toggle--last-window (selected-window))))
+(defun ghostel-toggle--remember-last-window (kind)
+  "Remember the selected window as the one to return to from KIND's panel."
+  (unless (ghostel-toggle--panel-window-p (selected-window) kind)
+    (setf (alist-get kind ghostel-toggle--last-window-alist)
+          (selected-window))))
 
-(defun ghostel-toggle--display-terminal-window (buf)
-  "Display BUF in the terminal drawer and return its window."
-  (let ((win (ghostel-toggle--terminal-window)))
+(defun ghostel-toggle--last-window (kind)
+  "Return the live window to return to from KIND's panel, or nil."
+  (let ((win (alist-get kind ghostel-toggle--last-window-alist)))
+    (when (window-live-p win)
+      win)))
+
+(defun ghostel-toggle--display-panel-window (kind buf)
+  "Display BUF in KIND's panel window and return that window."
+  (let ((win (ghostel-toggle--panel-window kind))
+        (side (ghostel-toggle--kind-get kind :side))
+        (size (ghostel-toggle--kind-get kind :size)))
     (if (window-live-p win)
         (progn
           (set-window-dedicated-p win nil)
           (set-window-buffer win buf)
-          (set-window-parameter win 'ghostel-toggle-window t)
+          (set-window-parameter win 'ghostel-toggle-kind kind)
           win)
-      (display-buffer-in-side-window
-       buf `((side . ,ghostel-toggle-side)
-             (slot . 0)
-             (window-height . ,ghostel-toggle-height)
-             (window-parameters . ((ghostel-toggle-window . t)
-                                   (no-delete-other-windows . t))))))))
+      (let ((dimension (if (memq side '(left right))
+                           'window-width
+                         'window-height)))
+        (display-buffer-in-side-window
+         buf `((side . ,side)
+               (slot . 0)
+               (,dimension . ,size)
+               (window-parameters . ((ghostel-toggle-kind . ,kind)
+                                     (no-delete-other-windows . t)))))))))
 
-(defun ghostel-toggle--display-buffer-in-terminal-window (buf _alist)
-  "Display BUF in the ghostel terminal drawer for `display-buffer'."
+(defun ghostel-toggle--finish-panel-window (kind win)
+  "Apply KIND's panel window settings to WIN."
+  (when (window-live-p win)
+    (set-window-dedicated-p win t)
+    (if (memq (ghostel-toggle--kind-get kind :side) '(left right))
+        (window-preserve-size win t t)
+      (window-preserve-size win nil t)))
+  win)
+
+(defun ghostel-toggle--show-panel (kind buf)
+  "Display BUF in KIND's panel window and return that window."
+  (let ((win (ghostel-toggle--display-panel-window kind buf)))
+    (ghostel-toggle--finish-panel-window kind win)))
+
+(defun ghostel-toggle--root-visible-p (kind root)
+  "Return non-nil when ROOT has a session visible in KIND's panel."
+  (when-let* ((win (ghostel-toggle--panel-window kind))
+              (session (ghostel-toggle--session-for-buffer
+                        (window-buffer win))))
+    (equal (ghostel-toggle--normalize-root root)
+           (plist-get session :root))))
+
+(defun ghostel-toggle-hide-panel (kind)
+  "Hide KIND's panel and restore the previous window when possible."
+  (when-let* ((win (ghostel-toggle--panel-window kind)))
+    (unless (one-window-p t)
+      (delete-window win))
+    (when-let* ((last (ghostel-toggle--last-window kind)))
+      (select-window last))))
+
+;;; Fullscreen views
+
+(defvar ghostel-toggle--fullscreen-views nil
+  "List of fullscreen views, one per (kind, project root) in fullscreen mode.
+Each entry is a plist (:kind KIND :buffer BUF :root ROOT :config
+WINDOW-CONFIG :hidden BOOL :dismiss BOOL): the session buffer, the
+project root that keys the view, the window configuration to restore
+when leaving fullscreen, whether the session is currently hidden
+\(collapsed to the code by the plain toggle key) while fullscreen mode
+persists, and whether hiding dismisses the view outright (the home
+fullscreens).  Fullscreen mode is sticky — it lasts until `s-<return>'
+demotes it back to the panel; the plain toggle key only flips the
+session's visibility within that mode.  Keying by (kind, root) lets
+several projects, and both kinds within one project, be in fullscreen
+mode independently.")
+
+(defvar ghostel-toggle--fullscreen-display nil
+  "When non-nil, the view whose full-frame window should receive a display.
+Bound around session creation so the new buffer takes over the frame
+instead of opening a side window.")
+
+(defvar ghostel-toggle--display-kind nil
+  "Kind whose panel should receive a `display-buffer' during creation.")
+
+(defun ghostel-toggle--prune-fullscreen-views ()
+  "Drop fullscreen views whose session buffer was killed."
+  (setq ghostel-toggle--fullscreen-views
+        (seq-filter (lambda (v) (buffer-live-p (plist-get v :buffer)))
+                    ghostel-toggle--fullscreen-views)))
+
+(defun ghostel-toggle--view-for-buffer (buffer)
+  "Return the fullscreen view whose session buffer is BUFFER, or nil."
+  (seq-find (lambda (v) (eq buffer (plist-get v :buffer)))
+            ghostel-toggle--fullscreen-views))
+
+(defun ghostel-toggle--view-for-root (kind root)
+  "Return the fullscreen view (shown or hidden) for KIND in ROOT, or nil.
+Keyed by kind and root rather than the current buffer so the plain
+toggle key and `s-<return>' find a project's fullscreen session even
+while it is hidden and point is on a code buffer."
+  (ghostel-toggle--prune-fullscreen-views)
+  (let ((root (ghostel-toggle--normalize-root root)))
+    (seq-find (lambda (v) (and (eq kind (plist-get v :kind))
+                               (equal root (plist-get v :root))))
+              ghostel-toggle--fullscreen-views)))
+
+(defun ghostel-toggle--current-fullscreen-view (kind)
+  "Return the KIND view shown full-frame in the selected window, or nil.
+The session must be the selected buffer and fill the frame, the view
+must not be hidden, and it must belong to KIND.  Display routing
+\(session switching, new sessions) uses this so a split pane, a hidden
+session, or the other kind's fullscreen is never mistaken for the
+fullscreen window."
+  (ghostel-toggle--prune-fullscreen-views)
+  (and (one-window-p t)
+       (let ((v (ghostel-toggle--view-for-buffer (current-buffer))))
+         (and v
+              (eq kind (plist-get v :kind))
+              (not (plist-get v :hidden))
+              v))))
+
+(defun ghostel-toggle--normalize-full-frame-window (win)
+  "Make WIN an ordinary full-frame window fit to host a session buffer.
+Undedicate it and strip the `window-side'/`window-slot'/
+`no-delete-other-windows'/`ghostel-toggle-kind' parameters a former
+panel leaves behind; left in place they make Emacs refuse
+`switch-to-buffer', can trap the session in a phantom side slot, and
+keep the full-frame window answering as the panel window.  Returns WIN."
+  (when (window-live-p win)
+    (set-window-dedicated-p win nil)
+    (set-window-parameter win 'window-side nil)
+    (set-window-parameter win 'window-slot nil)
+    (set-window-parameter win 'no-delete-other-windows nil)
+    (set-window-parameter win 'ghostel-toggle-kind nil))
+  win)
+
+(defun ghostel-toggle--display-fullscreen-window (buf &optional view)
+  "Display session BUF in the current full-frame window and return it.
+Repoints VIEW's session side to BUF (defaulting to the shown view of
+BUF's kind) so creating or switching sessions stays fullscreen."
+  (when-let* ((view (or view
+                        (when-let* ((session (ghostel-toggle--session-for-buffer buf)))
+                          (ghostel-toggle--current-fullscreen-view
+                           (plist-get session :kind))))))
+    (plist-put view :buffer buf))
+  (let ((win (selected-window)))
+    (set-window-dedicated-p win nil)
+    (set-window-buffer win buf)
+    (ghostel-toggle--normalize-full-frame-window win)))
+
+(defun ghostel-toggle--fill-frame (buf)
+  "Show BUF in the selected window and expand it to fill the frame."
+  (set-window-dedicated-p (selected-window) nil)
+  (switch-to-buffer buf)
+  ;; Bind `ignore-window-parameters' so the dedicated panels (and any
+  ;; other side windows) collapse too, giving a truly full-frame buffer.
+  (let ((ignore-window-parameters t))
+    (delete-other-windows))
+  ;; A promoted panel keeps its side-window parameters, which make Emacs
+  ;; refuse `switch-to-buffer'; normalize so the full-frame window behaves
+  ;; like an ordinary one (exit restores the real panel from the saved
+  ;; config).
+  (ghostel-toggle--normalize-full-frame-window (selected-window)))
+
+(defun ghostel-toggle--capture-restore-config (buf)
+  "Return the window configuration to restore when BUF's fullscreen ends.
+Normally the current layout, but if BUF already fills the frame as the sole
+window (e.g. a home key re-enters after the view was lost), that layout
+would just re-show BUF — dismissing it could never reveal the code.
+Snapshot the window's previous buffer instead, so demoting/hiding returns
+to real content."
+  (if (and (one-window-p t) (eq (current-buffer) buf))
+      (save-window-excursion
+        (let ((win (selected-window)))
+          (set-window-dedicated-p win nil)
+          (switch-to-prev-buffer win))
+        (current-window-configuration))
+    (current-window-configuration)))
+
+(defun ghostel-toggle--enter-fullscreen (buf &optional dismiss)
+  "Expand session BUF to fill the frame, registering a fullscreen view.
+The view is keyed by BUF's session kind and root so the plain toggle key
+and `s-<return>' can find it later even while it is hidden and point is
+on a code buffer.  When DISMISS is non-nil, hiding the view removes it
+outright instead of sticky-hiding it — used for the home fullscreens, so
+the plain toggle key dismisses them and the home key re-fires them fresh."
+  (let* ((session (ghostel-toggle--session-for-buffer buf))
+         (kind (plist-get session :kind))
+         (root (plist-get session :root)))
+    (push (list :kind kind
+                :buffer buf
+                :root (and root (ghostel-toggle--normalize-root root))
+                :config (ghostel-toggle--capture-restore-config buf)
+                :hidden nil
+                :dismiss dismiss)
+          ghostel-toggle--fullscreen-views))
+  (ghostel-toggle--fill-frame buf))
+
+(defun ghostel-toggle--show-fullscreen (view)
+  "Show VIEW's session fullscreen and mark the view visible.
+Fullscreen is sticky: the plain toggle key uses this to (re-)expand the
+session after it was hidden or the frame was split.  Re-snapshots the
+layout the session is about to cover (unless already on it) so
+hiding/demoting returns to the current splits, not the stale layout
+captured when fullscreen began."
+  (let ((buf (plist-get view :buffer)))
+    (unless (buffer-live-p buf)
+      (user-error "Fullscreen session buffer is no longer live"))
+    (unless (eq (current-buffer) buf)
+      (plist-put view :config (current-window-configuration)))
+    (plist-put view :hidden nil)
+    (ghostel-toggle--fill-frame buf)))
+
+(defun ghostel-toggle--exit-fullscreen (view)
+  "Restore the layout saved for VIEW and deregister it."
+  (let ((config (plist-get view :config))
+        (buf (plist-get view :buffer)))
+    (setq ghostel-toggle--fullscreen-views
+          (delq view ghostel-toggle--fullscreen-views))
+    (when (window-configuration-p config)
+      (set-window-configuration config))
+    ;; Reflect the session that was active in fullscreen (it may differ from
+    ;; the saved snapshot after cycling) back into its panel — except for
+    ;; `:dismiss' (home) views, which must never leak into a project panel.
+    (unless (plist-get view :dismiss)
+      (when-let* ((live (and (buffer-live-p buf) buf))
+                  (session (ghostel-toggle--session-for-buffer live)))
+        (ghostel-toggle--show-session session)))))
+
+(defun ghostel-toggle--hide-fullscreen (view)
+  "Hide VIEW's session, collapsing to just the code.
+Restores the pre-fullscreen layout and removes the session's window(s).
+A sticky VIEW is marked hidden so the next plain toggle re-expands it
+\(only `s-<return>' leaves that mode); a `:dismiss' VIEW (the home
+fullscreens) is removed outright so the plain toggle dismisses it and
+the home key re-fires it.  The restored layout may predate another
+view's hiding and resurrect that view's buffer full-frame; windows of
+every still-hidden view are swept too so hidden views stay hidden."
+  (let ((buf (plist-get view :buffer)))
+    (if (plist-get view :dismiss)
+        (setq ghostel-toggle--fullscreen-views
+              (delq view ghostel-toggle--fullscreen-views))
+      (plist-put view :hidden t))
+    (when (window-configuration-p (plist-get view :config))
+      (set-window-configuration (plist-get view :config)))
+    (dolist (b (cons buf
+                     (mapcar (lambda (v) (plist-get v :buffer))
+                             (seq-filter (lambda (v)
+                                           (and (not (eq v view))
+                                                (plist-get v :hidden)))
+                                         ghostel-toggle--fullscreen-views))))
+      (dolist (win (get-buffer-window-list b nil nil))
+        (if (window-deletable-p win)
+            (delete-window win)
+          ;; The frame's sole/main window can't be deleted; show its
+          ;; previous buffer instead of a wedged hidden session.
+          (set-window-dedicated-p win nil)
+          (switch-to-prev-buffer win))))
+    (when-let* ((last (ghostel-toggle--last-window (plist-get view :kind))))
+      (select-window last))))
+
+(defun ghostel-toggle--fullscreen-flip (view &optional before-show)
+  "Plain-toggle-key action for fullscreen VIEW (sticky fullscreen mode).
+On the session shown full-frame, hide it (collapse to the code).
+Otherwise (hidden, split, or on another buffer) re-expand the session to
+fullscreen, calling BEFORE-SHOW first when non-nil (only on the show
+path — instantiations use it to send an active region)."
+  (if (and (not (plist-get view :hidden))
+           (eq (current-buffer) (plist-get view :buffer))
+           (one-window-p t))
+      (ghostel-toggle--hide-fullscreen view)
+    (when before-show
+      (funcall before-show))
+    (ghostel-toggle--show-fullscreen view)))
+
+(defun ghostel-toggle-fullscreen-command ()
+  "Toggle fullscreen for the focused ghostel session.
+Promotion is focus-based: the current buffer must be a managed session
+buffer — its kind decides which fullscreen is toggled, so a terminal and
+an agent fullscreen can coexist for one project.  From any other buffer
+this errors; focus the panel first (`s-l' / `s-i').  When the session's
+\(kind, root) already holds a fullscreen view, demote it back to the
+panel and restore the saved layout; otherwise promote the session to
+fill the frame.
+
+Fullscreen is a sticky mode: once promoted, the kind's plain toggle key
+only flips the session's visibility (hide to the code / re-expand), and
+this command is the only way to demote the session back to the panel."
+  (interactive)
+  (let ((session (ghostel-toggle--current-session)))
+    (unless session
+      (user-error "No ghostel session focused (use s-l / s-i first)"))
+    (let* ((kind (plist-get session :kind))
+           (root (plist-get session :root))
+           (view (ghostel-toggle--view-for-root kind root)))
+      (if view
+          (ghostel-toggle--exit-fullscreen view)
+        (ghostel-toggle--enter-fullscreen (current-buffer))))))
+
+(defun ghostel-toggle-home-toggle (kind get-buffer)
+  "Toggle a dismissable fullscreen KIND session in the home directory.
+GET-BUFFER is called with the normalized home root and must return a
+live session buffer, creating the session if needed.  The home
+fullscreen is registered `:dismiss': the kind's plain toggle key
+dismisses it outright and the home key re-fires it fresh.  Keyed by the
+home root through the same machinery as the project fullscreens, so the
+two cannot collide."
+  (let* ((root (ghostel-toggle--normalize-root "~/"))
+         (view (ghostel-toggle--view-for-root kind root)))
+    (if view
+        ;; :dismiss views restore the saved layout without the trailing
+        ;; panel re-show, so demoting cannot leak the home session into
+        ;; the current project's panel.
+        (ghostel-toggle--exit-fullscreen view)
+      (let ((buf (funcall get-buffer root)))
+        (unless (buffer-live-p buf)
+          (user-error "Could not start home %s session" kind))
+        (ghostel-toggle--remember-last-window kind)
+        (ghostel-toggle--enter-fullscreen buf t)))))
+
+;;; Session display
+
+(defun ghostel-toggle--show-session (session)
+  "Display SESSION and return its window.
+Normally this targets the kind's panel window, but while a session of
+the same kind is shown fullscreen it reuses the current full-frame
+window so switching sessions stays fullscreen."
+  (unless (ghostel-toggle--session-live-p session)
+    (user-error "Ghostel session is no longer live"))
+  (ghostel-toggle--select-session session)
+  (let* ((kind (plist-get session :kind))
+         (buf (plist-get session :buffer))
+         (view (ghostel-toggle--current-fullscreen-view kind)))
+    (if view
+        (ghostel-toggle--display-fullscreen-window buf view)
+      (ghostel-toggle--show-panel kind buf))))
+
+(defun ghostel-toggle--show-session-by-id (id)
+  "Display ghostel session ID."
+  (let ((session (ghostel-toggle--live-session-by-id id)))
+    (unless session
+      (user-error "Ghostel session is no longer live"))
+    (ghostel-toggle--remember-last-window (plist-get session :kind))
+    (select-window (ghostel-toggle--show-session session))))
+
+(defun ghostel-toggle--show-session-in-window (session win)
+  "Show SESSION in WIN and return WIN."
+  (unless (ghostel-toggle--session-live-p session)
+    (user-error "Ghostel session is no longer live"))
+  (ghostel-toggle--select-session session)
+  (if (window-live-p win)
+      (let ((kind (plist-get session :kind))
+            (buf (ghostel-toggle--session-buffer session)))
+        (set-window-dedicated-p win nil)
+        (set-window-buffer win buf)
+        ;; Only a real panel window gets panel finishing; dedicating an
+        ;; exited fullscreen session's sole window would wedge the frame.
+        (when (ghostel-toggle--panel-window-p win kind)
+          (ghostel-toggle--finish-panel-window kind win))
+        win)
+    (ghostel-toggle--show-session session)))
+
+(defun ghostel-toggle-cycle-session (kind delta)
+  "Cycle the selected KIND session for this project by DELTA."
+  (let* ((root (or (ghostel-toggle--current-root kind)
+                   (ghostel-toggle--project-root)))
+         (root (ghostel-toggle--normalize-root root))
+         (sessions (ghostel-toggle--sessions-for-root kind root))
+         (selected (or (ghostel-toggle--selected-session kind root)
+                       (ghostel-toggle--current-session kind)
+                       (car sessions))))
+    (unless sessions
+      (user-error "No ghostel %s sessions for this project" kind))
+    (let* ((len (length sessions))
+           (index (or (cl-position (plist-get selected :id)
+                                   sessions
+                                   :key (lambda (session)
+                                          (plist-get session :id))
+                                   :test #'equal)
+                      0))
+           (next (nth (mod (+ index delta) len) sessions)))
+      (ghostel-toggle--remember-last-window kind)
+      (select-window (ghostel-toggle--show-session next)))))
+
+;;; Creation
+
+(defun ghostel-toggle--display-buffer-in-panel (buf _alist)
+  "Display BUF for `display-buffer' during managed session creation.
+Targets the current full-frame window when
+`ghostel-toggle--fullscreen-display' names the active view, else the
+panel window of `ghostel-toggle--display-kind'."
   (let ((buffer (get-buffer buf)))
     (when (and buffer
                (with-current-buffer buffer
                  (derived-mode-p 'ghostel-mode)))
-      (ghostel-toggle--display-terminal-window buffer))))
+      (if ghostel-toggle--fullscreen-display
+          (ghostel-toggle--display-fullscreen-window
+           buffer ghostel-toggle--fullscreen-display)
+        (ghostel-toggle--display-panel-window
+         ghostel-toggle--display-kind buffer)))))
 
-(defun ghostel-toggle--finish-terminal-window (win)
-  "Apply terminal drawer window settings to WIN."
-  (when (window-live-p win)
-    (set-window-dedicated-p win t)
-    (window-preserve-size win nil t))
-  win)
-
-(defun ghostel-toggle--show-session-in-window (session win)
-  "Display SESSION in WIN when possible, falling back to the drawer."
-  (unless (ghostel-toggle--session-live-p session)
-    (user-error "Ghostel terminal session is no longer live"))
-  (ghostel-toggle--select-session session)
-  (if (window-live-p win)
-      (let ((buf (ghostel-toggle--session-buffer session)))
-        (set-window-dedicated-p win nil)
-        (set-window-buffer win buf)
-        (set-window-parameter win 'ghostel-toggle-window t)
-        (ghostel-toggle--finish-terminal-window win))
-    (ghostel-toggle--show-session session)))
-
-(defun ghostel-toggle--create (root)
-  "Create a new Ghostel terminal in ROOT and return its window."
+(cl-defun ghostel-toggle-create-session (kind root &key name label extra setup)
+  "Create a new ghostel KIND session in ROOT and return its window.
+NAME is the buffer-identity component (defaults to KIND's name); LABEL
+overrides the default tab label; EXTRA is a plist of instantiation keys
+stored on the session; SETUP, when non-nil, is called with the new
+buffer after registration and display (e.g. to type an agent command)."
   (let* ((root (ghostel-toggle--normalize-root root))
          (default-directory root)
-         (id (ghostel-toggle--next-session-id))
-         (identity (ghostel-toggle--buffer-name root id))
+         (id (ghostel-toggle--next-session-id kind))
+         (identity (ghostel-toggle--buffer-name
+                    (or name (symbol-name kind)) root id))
+         (fs-view (ghostel-toggle--current-fullscreen-view kind))
          buf
          session)
     (let ((display-buffer-overriding-action
-           '((ghostel-toggle--display-buffer-in-terminal-window))))
-      (let ((ghostel-buffer-name identity)
-            (default-directory root))
+           '((ghostel-toggle--display-buffer-in-panel)))
+          (ghostel-toggle--display-kind kind)
+          (ghostel-toggle--fullscreen-display fs-view))
+      (let ((ghostel-buffer-name identity))
         (setq buf (ghostel nil))))
-    (setq session (ghostel-toggle--register-session root buf nil id))
+    (setq session (ghostel-toggle--register-session kind root buf
+                                                    :label label
+                                                    :extra extra
+                                                    :id id))
     (ghostel-toggle--select-session session)
     (let ((win (or (get-buffer-window buf t)
-                   (ghostel-toggle--display-terminal-window buf))))
-      (ghostel-toggle--finish-terminal-window win)
+                   (if fs-view
+                       (ghostel-toggle--display-fullscreen-window buf fs-view)
+                     (ghostel-toggle--display-panel-window kind buf)))))
+      (unless fs-view
+        (ghostel-toggle--finish-panel-window kind win))
       (ghostel-toggle--install-buffer-locals session)
+      (when setup
+        (funcall setup buf))
       (ghostel-toggle--refresh-tab-lines root)
       win)))
 
-(defun ghostel-toggle--show-session (session)
-  "Display SESSION in the Ghostel terminal drawer and return its window."
-  (unless (ghostel-toggle--session-live-p session)
-    (user-error "Ghostel terminal session is no longer live"))
-  (ghostel-toggle--select-session session)
-  (let ((win (ghostel-toggle--display-terminal-window
-              (ghostel-toggle--session-buffer session))))
-    (ghostel-toggle--finish-terminal-window win)))
+(cl-defun ghostel-toggle--create-session-hidden (kind root &rest args)
+  "Create a KIND session in ROOT without touching the current layout.
+ARGS are passed to `ghostel-toggle-create-session'.  Isolated from any
+current fullscreen view so e.g. promoting the home session from inside a
+project's fullscreen cannot hijack that project's view."
+  (save-window-excursion
+    (let ((ghostel-toggle--fullscreen-views nil))
+      (apply #'ghostel-toggle-create-session kind root args))))
 
-(defun ghostel-toggle--show-session-by-id (id)
-  "Display Ghostel terminal session ID."
-  (interactive)
-  (let ((session (ghostel-toggle--live-session-by-id id)))
-    (unless session
-      (user-error "Ghostel terminal session no longer exists"))
-    (ghostel-toggle--remember-last-window)
-    (select-window (ghostel-toggle--show-session session))))
-
-(defun ghostel-toggle--previous-session (session)
-  "Return the live session before SESSION in the same project, or nil."
-  (when (ghostel-toggle--session-live-p session)
-    (let* ((root (plist-get session :root))
-           (session-id (plist-get session :id))
-           (sessions (ghostel-toggle--sessions-for-root root))
-           (ids (mapcar (lambda (candidate)
-                          (plist-get candidate :id))
-                        sessions))
-           (position (cl-position session-id ids :test #'equal)))
-      (cond
-       ((null (cdr sessions)) nil)
-       ((and position (> position 0))
-        (nth (1- position) sessions))
-       (t
-        (ghostel-toggle--last (remove session sessions)))))))
+;;; Exit / kill handling
 
 (defun ghostel-toggle--after-exit (buf _event)
-  "Keep the terminal drawer visible when BUF exits and another tab exists."
+  "Keep BUF's window on the next live session when BUF's process exits."
   (when-let* ((session (ghostel-toggle--session-for-buffer buf)))
-    (let* ((root (plist-get session :root))
-           (win (get-buffer-window buf t))
-           (next (ghostel-toggle--previous-session session)))
-      (if next
-          (ghostel-toggle--show-session-in-window next win)
-        (run-at-time 0 nil
-                     (lambda (root)
-                       (ghostel-toggle--cleanup-sessions)
-                       (ghostel-toggle--refresh-tab-lines root))
-                     root)))))
+    (let ((root (plist-get session :root))
+          (win (get-buffer-window buf t))
+          (next (ghostel-toggle--previous-session session))
+          (view (ghostel-toggle--view-for-buffer buf)))
+      (when next
+        ;; Exiting while fullscreen: repoint the view at the successor so
+        ;; fullscreen mode survives instead of dying with the killed buffer.
+        (when view
+          (plist-put view :buffer (ghostel-toggle--session-buffer next)))
+        (ghostel-toggle--show-session-in-window next win))
+      (run-at-time 0 nil
+                   (lambda (root)
+                     (ghostel-toggle--cleanup-sessions)
+                     (ghostel-toggle--refresh-tab-lines root))
+                   root))))
 
 (defun ghostel-toggle--kill-buffer-hook ()
-  "Refresh terminal session state after a managed buffer is killed."
+  "Refresh session state after a managed buffer is killed."
   (when-let* ((session (ghostel-toggle--session-for-buffer (current-buffer)))
               (root (plist-get session :root)))
     (run-at-time 0 nil
@@ -379,129 +774,69 @@ When ROOT is non-nil, refresh only sessions in that project."
                    (ghostel-toggle--refresh-tab-lines root))
                  root)))
 
+;;; Tab line
+
+(defface ghostel-toggle-tab-current
+  '((t :inherit tab-line-tab-current :weight bold :underline nil))
+  "Face for the selected ghostel session tab.")
+
+(defface ghostel-toggle-tab
+  '((t :inherit tab-line-tab))
+  "Face for inactive ghostel session tabs.")
+
+(set-face-attribute 'ghostel-toggle-tab-current nil
+                    :inherit 'tab-line-tab-current
+                    :weight 'bold
+                    :underline nil)
+
 (defun ghostel-toggle--tab-line-tab (session selected-id)
   "Return a tab-line button for SESSION.
-SELECTED-ID is the selected session id for this project."
+SELECTED-ID is the selected session id for the current kind and root."
   (let* ((id (plist-get session :id))
-         (selected (equal id selected-id))
          (label (plist-get session :label))
-         (map (let ((map (make-sparse-keymap)))
-                (define-key map [tab-line mouse-1]
-                            (lambda ()
-                              (interactive)
-                              (ghostel-toggle--show-session-by-id id)))
-                (define-key map [mouse-1]
-                            (lambda ()
-                              (interactive)
-                              (ghostel-toggle--show-session-by-id id)))
-                map)))
-    (propertize (if selected
-                    (format " [%s] " label)
-                  (format " %s " label))
+         (selected (equal id selected-id))
+         (map (make-sparse-keymap))
+         (text (if selected
+                   (format " [%s] " label)
+                 (format "  %s  " label))))
+    (define-key map [tab-line mouse-1]
+                (lambda ()
+                  (interactive)
+                  (ghostel-toggle--show-session-by-id id)))
+    (define-key map [mouse-1]
+                (lambda ()
+                  (interactive)
+                  (ghostel-toggle--show-session-by-id id)))
+    (propertize text
                 'face (if selected
                           'ghostel-toggle-tab-current
                         'ghostel-toggle-tab)
                 'mouse-face 'tab-line-highlight
                 'local-map map
-                'help-echo "mouse-1: switch Ghostel terminal tab")))
+                'help-echo "mouse-1: switch ghostel session")))
 
 (defun ghostel-toggle--tab-line ()
-  "Return the Ghostel terminal tab line for the current buffer."
-  (let* ((root (ghostel-toggle--current-root))
-         (sessions (and root (ghostel-toggle--sessions-for-root root)))
-         (selected (and root (ghostel-toggle--selected-session root)))
-         (current (ghostel-toggle--current-session))
-         (selected-id (or (and selected (plist-get selected :id))
-                          (and current (plist-get current :id)))))
-    (when (cdr sessions)
-      (append
-       (list " ")
-       (mapcan (lambda (session)
-                 (list (ghostel-toggle--tab-line-tab session selected-id)
-                       " "))
-               sessions)))))
-
-(defun ghostel-toggle--root-visible-p (root)
-  "Return non-nil when ROOT has a session visible in the terminal drawer."
-  (when-let* ((win (ghostel-toggle--terminal-window))
-              (session (ghostel-toggle--session-for-buffer
-                        (window-buffer win))))
-    (equal (ghostel-toggle--normalize-root root)
-           (plist-get session :root))))
-
-(defun ghostel-toggle--hide-terminal-window ()
-  "Hide the terminal drawer and restore the previous window when possible."
-  (when-let* ((win (ghostel-toggle--terminal-window)))
-    (unless (one-window-p t)
-      (delete-window win))
-    (when (and ghostel-toggle--last-window
-               (window-live-p ghostel-toggle--last-window))
-      (select-window ghostel-toggle--last-window))))
-
-(defun ghostel-toggle-new-session ()
-  "Create a new Ghostel terminal tab for the current project."
-  (interactive)
-  (let* ((root (or (ghostel-toggle--current-root)
-                   (ghostel-toggle--project-root)))
-         (root (ghostel-toggle--normalize-root root)))
-    (ghostel-toggle--remember-last-window)
-    (select-window (ghostel-toggle--create root))))
-
-(defun ghostel-toggle ()
-  "Toggle the project Ghostel terminal drawer.
-With a prefix argument, create a new terminal tab for the project."
-  (interactive)
-  (let* ((root (or (ghostel-toggle--current-root)
-                   (ghostel-toggle--project-root)))
-         (root (ghostel-toggle--normalize-root root)))
-    (if current-prefix-arg
-        (ghostel-toggle-new-session)
-      (let ((session (ghostel-toggle--default-session root)))
-        (cond
-         ((ghostel-toggle--root-visible-p root)
-          (ghostel-toggle--hide-terminal-window))
-         (session
-          (ghostel-toggle--remember-last-window)
-          (select-window (ghostel-toggle--show-session session)))
-         (t
-          (ghostel-toggle--remember-last-window)
-          (select-window (ghostel-toggle--create root))))))))
-
-(defun ghostel-toggle-cycle-session (delta)
-  "Cycle the selected Ghostel terminal session by DELTA."
-  (let* ((root (or (ghostel-toggle--current-root)
-                   (ghostel-toggle--project-root)))
-         (root (ghostel-toggle--normalize-root root))
-         (sessions (ghostel-toggle--sessions-for-root root))
-         (selected (or (ghostel-toggle--selected-session root)
-                       (ghostel-toggle--current-session)
-                       (car sessions)))
-         (selected-id (and selected (plist-get selected :id)))
-         (ids (mapcar (lambda (session)
-                        (plist-get session :id))
-                      sessions)))
-    (unless sessions
-      (user-error "No Ghostel terminal sessions for this project"))
-    (let* ((position (or (cl-position selected-id ids :test #'equal) 0))
-           (next (nth (mod (+ position delta) (length sessions)) sessions)))
-      (ghostel-toggle--remember-last-window)
-      (select-window (ghostel-toggle--show-session next)))))
-
-(defun ghostel-toggle-next-session ()
-  "Switch to the next Ghostel terminal session for this project."
-  (interactive)
-  (ghostel-toggle-cycle-session 1))
-
-(defun ghostel-toggle-previous-session ()
-  "Switch to the previous Ghostel terminal session for this project."
-  (interactive)
-  (ghostel-toggle-cycle-session -1))
+  "Return the ghostel session tab line for the current buffer.
+Lists only sessions of this buffer's kind in this buffer's project."
+  (let* ((kind ghostel-toggle--kind)
+         (root (and kind (ghostel-toggle--current-root kind)))
+         (sessions (and root (ghostel-toggle--sessions-for-root kind root)))
+         (selected (and root (ghostel-toggle--selected-session kind root)))
+         (current (ghostel-toggle--current-session kind))
+         (selected-id (or (plist-get current :id)
+                          (plist-get selected :id))))
+    (when (> (length sessions) 1)
+      (apply #'concat
+             " "
+             (mapcar (lambda (session)
+                       (ghostel-toggle--tab-line-tab session selected-id))
+                     sessions)))))
 
 (add-hook 'ghostel-exit-functions #'ghostel-toggle--after-exit)
 (add-hook 'kill-buffer-hook #'ghostel-toggle--kill-buffer-hook)
 
-(define-key ghostel-toggle-session-mode-map (kbd "s-t") #'ghostel-toggle-new-session)
+(global-set-key (kbd "s-<return>") #'ghostel-toggle-fullscreen-command)
 
-(global-set-key (kbd "s-i") #'ghostel-toggle)
+(provide 'ghostel-toggle)
 
 ;;; ghostel-toggle.el ends here

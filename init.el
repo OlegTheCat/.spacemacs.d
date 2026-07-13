@@ -609,6 +609,7 @@ before packages are loaded."
                  "agent-shell-config"
                  "quick-diff"
                  "ghostel"
+                 "ghostel-terminals"
                  "ghostel-agents"))
       (load (expand-file-name f config-dir)))))
 

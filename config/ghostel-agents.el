@@ -131,11 +131,6 @@ HIDDEN is non-nil, create without touching the current window layout."
         (apply #'ghostel-toggle--create-session-hidden 'agent root args)
       (apply #'ghostel-toggle-create-session 'agent root args))))
 
-(defun ghostel-agent--root ()
-  "Return the project root for agent commands."
-  (or (ghostel-toggle--current-root)
-      (ghostel-toggle--project-root)))
-
 (defun ghostel-agent--send-region (buf)
   "Send the active region with file context to the ghostel agent BUF."
   (let* ((beg (region-beginning))
@@ -231,7 +226,7 @@ session if none exists.  `C-2 s-l' toggles the latest Codex session,
 and `C-3 s-l' creates a Codex resume session only when no Codex
 session exists yet."
   (interactive "P")
-  (let* ((root (ghostel-agent--root))
+  (let* ((root (ghostel-toggle-command-root))
          (view (and (null arg)
                     (ghostel-toggle--view-for-root 'agent root))))
     (if view
@@ -256,7 +251,7 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
   (let* ((parsed (ghostel-agent--parse-prefix arg))
          (agent (or (car parsed) 'claude))
          (resume (cadr parsed))
-         (root (ghostel-agent--root)))
+         (root (ghostel-toggle-command-root)))
     (ghostel-toggle--remember-last-window 'agent)
     (select-window (ghostel-agent--create agent root resume))))
 

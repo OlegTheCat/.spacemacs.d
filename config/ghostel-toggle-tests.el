@@ -634,6 +634,23 @@ re-showing the home session in a project panel."
       (should-not (get-buffer-window buf))
       (should-not (ghostel-toggle--panel-window 'terminal)))))
 
+(ert-deftest gtl-fs-kill-sole-fullscreen-restores-layout ()
+  "Killing the only session while it is fullscreen (shell `exit') restores
+the saved layout instead of stranding the frame on a fallback buffer."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (gt--show-code root)
+      (split-window-right)                        ; a layout worth restoring
+      (let ((code-buf (current-buffer)))
+        (ghostel-terminal-toggle)                 ; create terminal in drawer
+        (ghostel-toggle-fullscreen-command)       ; promote
+        (let ((buf (current-buffer)))
+          (ghostel-toggle--after-exit buf nil)    ; no successor → nothing shown
+          (kill-buffer buf))                      ; ghostel kills the buffer
+        (should-not ghostel-toggle--fullscreen-views)
+        (should (= (gt--win-count) 2))            ; the split is back
+        (should (get-buffer-window code-buf))))))
+
 ;;; ============================================================================
 ;;; D. gta- — agents instantiation
 ;;; ============================================================================
@@ -1590,6 +1607,28 @@ independently."
       (should-not (ghostel-toggle--view-for-root 'agent home))
       (should-not (get-buffer-window habuf))
       (should-not (get-buffer-window htbuf)))))
+
+(ert-deftest gtx-home-demote-out-of-order-rebases ()
+  "Demoting a home fullscreen buried under the other kind's home fullscreen
+must not restore its stale layout: the visible view stays put and inherits
+the removed view's snapshot, so unwinding it skips the dead view."
+  (gt-with-env
+    (let* ((home (ghostel-toggle--normalize-root "~/"))
+           (ha (gta--register 'claude home))
+           (ht (gtt--register home))
+           (habuf (plist-get ha :buffer))
+           (htbuf (plist-get ht :buffer))
+           (code (gt--show-code "/tmp/projA/")))
+      (ghostel-agent-home-toggle nil)             ; home agent fullscreen
+      (ghostel-terminal-home-toggle)              ; home terminal on top
+      (should (gt--fullscreen-now-p htbuf))
+      (ghostel-agent-home-toggle nil)             ; demote the BURIED agent
+      (should (gt--fullscreen-now-p htbuf))       ; terminal untouched
+      (should-not (ghostel-toggle--view-for-root 'agent home))
+      (ghostel-terminal-home-toggle)              ; demote the terminal
+      (should-not (ghostel-toggle--view-for-root 'terminal home))
+      (should-not (get-buffer-window habuf))      ; no resurrected agent
+      (should (get-buffer-window code)))))        ; the original layout
 
 (ert-deftest gtx-s-l-in-terminal-buffer-targets-agent-of-same-root ()
   (gt-with-env

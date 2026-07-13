@@ -50,15 +50,10 @@ Reuses freed numbers: killing \"Terminal\" makes the next one \"Terminal\"."
   (ghostel-toggle-create-session 'terminal root
                                  :label (ghostel-terminal--next-label root)))
 
-(defun ghostel-terminal--root ()
-  "Return the project root for terminal commands."
-  (or (ghostel-toggle--current-root)
-      (ghostel-toggle--project-root)))
-
 (defun ghostel-terminal-new-session ()
   "Create a new ghostel terminal tab for the current project."
   (interactive)
-  (let ((root (ghostel-terminal--root)))
+  (let ((root (ghostel-toggle-command-root)))
     (ghostel-toggle--remember-last-window 'terminal)
     (select-window (ghostel-terminal--create root))))
 
@@ -74,7 +69,7 @@ dismissed outright.  Otherwise: hide the drawer when it shows this
 project (even unfocused), else show the default session, creating one
 when none exists."
   (interactive)
-  (let* ((root (ghostel-terminal--root))
+  (let* ((root (ghostel-toggle-command-root))
          (view (and (not current-prefix-arg)
                     (ghostel-toggle--view-for-root 'terminal root))))
     (cond

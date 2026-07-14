@@ -431,22 +431,27 @@ while it is hidden and point is on a code buffer."
 
 (defun ghostel-toggle--current-fullscreen-view (kind root)
   "Return the KIND/ROOT view shown full-frame in the selected window, or nil.
-The session must be the selected buffer and fill the frame, the view
-must not be hidden, and it must belong to KIND in ROOT.  Display routing
-\(session switching, new sessions) uses this so a split pane, a hidden
-session, the other kind's fullscreen, or another root's same-kind
+The session must be the selected buffer in the sole non-side window, the
+view must not be hidden, and it must belong to KIND in ROOT.  Display
+routing (session switching, new sessions) uses this so a split pane, a
+hidden session, the other kind's fullscreen, or another root's same-kind
 fullscreen (e.g. the home terminal stacked over a project terminal) is
 never mistaken for the fullscreen window — reusing a wrong-root view's
-window would repoint that view's buffer across projects."
+window would repoint that view's buffer across projects.  Side windows
+don't count: a panel punched over the fullscreen must not unmake it, or
+cycling from the fullscreen would reroute sessions into the panel."
   (ghostel-toggle--prune-fullscreen-views)
-  (and (one-window-p t)
-       (let ((v (ghostel-toggle--view-for-buffer (current-buffer))))
-         (and v
-              (eq kind (plist-get v :kind))
-              (equal (and root (ghostel-toggle--normalize-root root))
-                     (plist-get v :root))
-              (not (plist-get v :hidden))
-              v))))
+  (let ((wins (seq-remove (lambda (w) (window-parameter w 'window-side))
+                          (window-list (selected-frame) 'no-minibuf))))
+    (and (= (length wins) 1)
+         (eq (selected-window) (car wins))
+         (let ((v (ghostel-toggle--view-for-buffer (current-buffer))))
+           (and v
+                (eq kind (plist-get v :kind))
+                (equal (and root (ghostel-toggle--normalize-root root))
+                       (plist-get v :root))
+                (not (plist-get v :hidden))
+                v)))))
 
 (defun ghostel-toggle--shown-view ()
   "Return the view whose buffer fills the frame's main window, or nil.
@@ -533,7 +538,7 @@ the plain toggle key dismisses them and the home key re-fires them fresh."
   (let* ((session (ghostel-toggle--session-for-buffer buf))
          (kind (plist-get session :kind))
          (root (plist-get session :root))
-         (covering (ghostel-toggle--shown-view)))
+         (covering (ghostel-toggle--displayed-view)))
     ;; Entering over another fullscreen stacks on top of it: the covered
     ;; view is the reveal target, and the real-layout snapshot is
     ;; inherited from it rather than pointing at its full-frame buffer.
@@ -554,15 +559,15 @@ the plain toggle key dismisses them and the home key re-fires them fresh."
 Fullscreen is sticky: the plain toggle key uses this to (re-)expand the
 session after it was hidden, split, or covered.  Over a real (non-
 fullscreen) layout the snapshot is re-taken so hiding/demoting returns
-to the current splits; while the view already fills the main window
-\(point may sit in a panel punched over it) the snapshot is kept —
-re-taking it would capture the view's own full-frame buffer and lose
-the real layout; over another shown fullscreen the view is restacked
+to the current splits; while the view is already on display (point may
+sit in a panel punched over it, or the user split it) the snapshot is
+kept — re-taking it would capture the view's own buffer and lose the
+real layout; over another displayed fullscreen the view is restacked
 on top of it instead — snapshots never point at a sibling fullscreen,
 which would lose the underlying layout and resurrect demoted sessions
 when unwinding."
   (let ((buf (plist-get view :buffer))
-        (covering (ghostel-toggle--shown-view)))
+        (covering (ghostel-toggle--displayed-view)))
     (unless (buffer-live-p buf)
       (user-error "Fullscreen session buffer is no longer live"))
     ;; The view's session becomes the displayed one; select it so cycling
@@ -621,12 +626,38 @@ on display, so removing it must not touch the current layout."
                        (not (window-parameter win 'window-side)))
                      (get-buffer-window-list (plist-get view :buffer)))))))
 
+(defun ghostel-toggle--displayed-view ()
+  "Return the view on display in the frame's main area, or nil.
+The view filling the main window, or — after the user split a
+fullscreen — the view whose buffer still shows in a non-side pane.
+Entering or re-showing a fullscreen treats this view as the one it
+covers, so a snapshot never captures a sibling view's session pane —
+restoring such a snapshot after that view was demoted would resurrect
+its session as an anonymous pane."
+  (or (ghostel-toggle--shown-view)
+      (seq-find #'ghostel-toggle--view-on-display-p
+                ghostel-toggle--fullscreen-views)))
+
+(defun ghostel-toggle--reveal-view (view)
+  "Fill the frame with VIEW's session and select that session.
+Used when hiding or demoting a stacked fullscreen reveals VIEW: the
+selection may have drifted to another same-kind session while VIEW was
+covered (e.g. one created into a punched panel), and cycling must
+anchor to the tab back on screen."
+  (when-let* ((session (ghostel-toggle--session-for-buffer
+                        (plist-get view :buffer))))
+    (ghostel-toggle--select-session session))
+  (ghostel-toggle--fill-frame (plist-get view :buffer)))
+
 (defun ghostel-toggle--sweep-view-windows (view buf)
   "Delete windows showing BUF or any hidden view's buffer other than VIEW's.
 A restored configuration may predate another view's hiding and resurrect
 its buffer full-frame; sweeping keeps hidden views hidden.  Windows that
 cannot be deleted (the frame's sole/main window) show their previous
-buffer instead of a wedged session."
+buffer instead of a wedged session.  VIEW's own kind's panel is swept
+too when it shows a session of VIEW's root: after cycling repointed the
+view, the restored panel shows the session promoted from — not BUF — and
+would slip past the buffer-keyed sweep as a stale drawer."
   (dolist (b (cons buf
                    (mapcar (lambda (v) (plist-get v :buffer))
                            (seq-filter (lambda (v)
@@ -637,7 +668,13 @@ buffer instead of a wedged session."
       (if (window-deletable-p win)
           (delete-window win)
         (set-window-dedicated-p win nil)
-        (switch-to-prev-buffer win)))))
+        (switch-to-prev-buffer win))))
+  (let ((kind (plist-get view :kind))
+        (root (plist-get view :root)))
+    (when (and root (ghostel-toggle--root-visible-p kind root))
+      (let ((panel (ghostel-toggle--panel-window kind)))
+        (when (window-deletable-p panel)
+          (delete-window panel))))))
 
 (defun ghostel-toggle--remove-view (view)
   "Deregister VIEW and unwind the frame appropriately.
@@ -655,7 +692,7 @@ alone."
     (ghostel-toggle--rebase-children view)
     (when top
       (if under
-          (ghostel-toggle--fill-frame (plist-get under :buffer))
+          (ghostel-toggle--reveal-view under)
         (when (window-configuration-p (plist-get view :config))
           (set-window-configuration (plist-get view :config)))
         (ghostel-toggle--sweep-view-windows view (plist-get view :buffer))))))
@@ -691,7 +728,7 @@ view are swept too so hidden views stay hidden."
           (ghostel-toggle--rebase-children view))
       (plist-put view :hidden t))
     (if under
-        (ghostel-toggle--fill-frame (plist-get under :buffer))
+        (ghostel-toggle--reveal-view under)
       (when (window-configuration-p (plist-get view :config))
         (set-window-configuration (plist-get view :config)))
       (ghostel-toggle--sweep-view-windows view buf))
@@ -747,10 +784,10 @@ two cannot collide."
   (let* ((root (ghostel-toggle--normalize-root "~/"))
          (view (ghostel-toggle--view-for-root kind root)))
     (cond
-     ;; On top → demote.  :dismiss views restore the layout without the
-     ;; trailing panel re-show, so demoting cannot leak the home session
-     ;; into the current project's panel.
-     ((and view (eq (ghostel-toggle--shown-view) view))
+     ;; On display (even split by the user) → demote.  :dismiss views
+     ;; restore the layout without the trailing panel re-show, so demoting
+     ;; cannot leak the home session into the current project's panel.
+     ((and view (ghostel-toggle--view-on-display-p view))
       (ghostel-toggle--exit-fullscreen view))
      ;; Covered by the other home fullscreen (or otherwise not shown) →
      ;; one press brings it back on top instead of dismissing it

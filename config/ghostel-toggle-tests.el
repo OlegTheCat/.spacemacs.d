@@ -817,23 +817,22 @@ happens only after registration) and the flip still recovers it."
 (ert-deftest gtl-fs-restored-panel-stays-recognized ()
   "A panel window resurrected by a config restore keeps its kind param.
 Promotion reuses and normalizes the panel window; without persisting the
-parameter the restored drawer is an anonymous side window that the next
-toggle re-tags instead of hiding."
+parameter the restored drawer is an anonymous side window that neither
+the panel sweep nor the next toggle can recognize.  (The hide path now
+sweeps the same-root drawer away, so the restore is exercised directly.)"
   (gt-with-env
     (let* ((root "/tmp/projA/")
-           (t1 (gtt--register root))
-           (t2 (gtt--register root)))
+           (t1 (gtt--register root)))
       (gt--show-code root)
       (ghostel-toggle--select-session t1)
       (ghostel-terminal-toggle)                   ; drawer on t1, focused
-      (ghostel-toggle-fullscreen-command)         ; promote (reuses drawer win)
-      (ghostel-toggle--show-session t2)           ; switch tabs in fullscreen
-      (set-buffer (window-buffer (selected-window)))
-      (ghostel-terminal-toggle)                   ; s-i → hide, restore drawer
-      (let ((w (ghostel-toggle--panel-window 'terminal)))
-        (should w)
-        (should (eq (window-buffer w) (plist-get t1 :buffer)))
-        (should (ghostel-toggle--root-visible-p 'terminal root))))))
+      (let ((conf (current-window-configuration)))
+        (ghostel-toggle-fullscreen-command)       ; promote (reuses+strips win)
+        (set-window-configuration conf)           ; what hide's restore does
+        (let ((w (ghostel-toggle--panel-window 'terminal)))
+          (should w)
+          (should (eq (window-buffer w) (plist-get t1 :buffer)))
+          (should (ghostel-toggle--root-visible-p 'terminal root)))))))
 
 (ert-deftest gtl-fs-promotion-clears-preserved-size ()
   "A session promoted from its panel must not keep the panel's preserved
@@ -867,6 +866,74 @@ while the view was hidden."
       (ghostel-toggle--show-fullscreen
        (ghostel-toggle--view-for-root 'terminal root))
       (should (eq (ghostel-toggle--selected-session 'terminal root) t1)))))
+
+(ert-deftest gtl-fs-hide-after-cycle-leaves-no-stale-drawer ()
+  "Hiding a fullscreen after cycling sessions must collapse to the code,
+not restore the pre-promotion drawer showing the session promoted from.
+The sweep is buffer-keyed, so without a panel sweep the stale drawer
+slips through whenever cycling repointed the view."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root))
+           (b1 (plist-get t1 :buffer))
+           (b2 (plist-get t2 :buffer))
+           (code (gt--show-code root)))
+      (ghostel-toggle--show-session t1)           ; drawer showing T1
+      (select-window (get-buffer-window b1))
+      (ghostel-toggle-fullscreen-command)         ; promote T1
+      (ghostel-toggle--show-session t2)           ; cycle → T2 fullscreen
+      (set-buffer (window-buffer (selected-window)))
+      (ghostel-terminal-toggle)                   ; s-i → hide
+      (should (get-buffer-window code))
+      (should-not (ghostel-toggle--panel-window 'terminal))
+      (should-not (get-buffer-window b1))
+      (should-not (get-buffer-window b2))
+      (should (plist-get (ghostel-toggle--view-for-root 'terminal root)
+                         :hidden)))))
+
+(ert-deftest gtl-fs-promote-over-split-view-stacks-under ()
+  "Promoting a fullscreen over another view the user split must stack on
+top of it, not snapshot the split — otherwise demoting the covered view
+and unwinding the top resurrects the demoted session as an anonymous
+pane."
+  (gt-with-env
+    (let* ((sa (gtt--register "/tmp/projA/"))
+           (sb (gtt--register "/tmp/projB/"))
+           (abuf (plist-get sa :buffer))
+           (bbuf (plist-get sb :buffer))
+           (code (gt--show-code "/tmp/projA/")))
+      (ghostel-toggle--enter-fullscreen abuf)     ; A fullscreen
+      (select-window (split-window-below))        ; user splits it
+      (gt--show-code "/tmp/projA/")               ; code in the new pane
+      (ghostel-toggle--enter-fullscreen bbuf)     ; B promoted over split A
+      (let ((va (ghostel-toggle--view-for-root 'terminal "/tmp/projA/"))
+            (vb (ghostel-toggle--view-for-root 'terminal "/tmp/projB/")))
+        (should (eq (plist-get vb :under) va))    ; stacked, not snapshotted
+        (ghostel-toggle--exit-fullscreen va)      ; demote A while covered
+        (ghostel-toggle--hide-fullscreen vb)      ; unwind the top
+        (should-not (ghostel-toggle--view-for-root 'terminal "/tmp/projA/"))
+        (should (get-buffer-window code))         ; the real layout is back
+        (should-not (get-buffer-window abuf))))))
+
+(ert-deftest gtl-fs-home-toggle-dismisses-split-home ()
+  "One home-toggle press on a home fullscreen the user split must dismiss
+it and restore the previous layout, not re-expand it (the on-top test
+sees no shown view in a split and falls to the bring-on-top branch)."
+  (gt-with-env
+    (let* ((home (ghostel-toggle--normalize-root "~/"))
+           (s (gtt--register home))
+           (buf (plist-get s :buffer))
+           (code (gt--show-code "/tmp/projA/")))
+      (ghostel-toggle-home-toggle 'terminal (lambda (_) buf))
+      (should (gt--fullscreen-now-p buf))
+      (select-window (split-window-below))        ; user splits the fullscreen
+      (gt--show-code "/tmp/projA/")               ; code in the new pane
+      (ghostel-toggle-home-toggle 'terminal (lambda (_) buf))
+      (should-not (ghostel-toggle--view-for-root 'terminal home))
+      (should (get-buffer-window code))
+      (should-not (get-buffer-window buf))
+      (should-not (ghostel-toggle--panel-window 'terminal)))))
 
 ;;; ============================================================================
 ;;; D. gta- — agents instantiation
@@ -1907,5 +1974,50 @@ layout instead of resurrecting the dead session's buffer."
       (ghostel-agent-toggle-command nil)            ; s-l from the drawer
       (should (ghostel-toggle--panel-window-p (selected-window) 'agent))
       (should (eq (current-buffer) (plist-get as :buffer))))))
+
+(ert-deftest gtx-cycle-under-sidebar-stays-fullscreen ()
+  "Cycling terminals while the agent sidebar is punched over the terminal
+fullscreen must switch the fullscreen window, not open a drawer — side
+windows must not unmake the fullscreen for display routing."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root))
+           (b1 (plist-get t1 :buffer))
+           (b2 (plist-get t2 :buffer))
+           (sa (gta--register 'claude root)))
+      (gt--show-code root)
+      (ghostel-toggle--show-session t1)           ; drawer showing T1
+      (select-window (get-buffer-window b1))
+      (ghostel-toggle-fullscreen-command)         ; T1 fullscreen
+      (ghostel-toggle--show-panel 'agent (plist-get sa :buffer))
+      (ghostel-toggle-cycle-session 'terminal 1)  ; s-<right> in the fullscreen
+      (let ((view (ghostel-toggle--view-for-root 'terminal root)))
+        (should (eq (plist-get view :buffer) b2)))
+      (should (eq (window-buffer (window-main-window)) b2))
+      (should-not (ghostel-toggle--panel-window 'terminal))
+      (should (ghostel-toggle--panel-window 'agent)))))
+
+(ert-deftest gtx-reveal-under-view-selects-its-session ()
+  "Hiding a fullscreen that covers another view must select the revealed
+session, so cycling is anchored to the tab back on screen even after
+another same-kind session was selected while the view was covered."
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (t1 (gtt--register root))
+           (t2 (gtt--register root))
+           (b1 (plist-get t1 :buffer))
+           (sa (gta--register 'claude root))
+           (abuf (plist-get sa :buffer)))
+      (gt--show-code root)
+      (ghostel-toggle--show-session t1)           ; drawer showing T1
+      (select-window (get-buffer-window b1))
+      (ghostel-toggle-fullscreen-command)         ; T1 fullscreen
+      (ghostel-toggle--enter-fullscreen abuf)     ; agent fullscreen over it
+      (ghostel-toggle--select-session t2)         ; drift while covered
+      (ghostel-toggle--hide-fullscreen
+       (ghostel-toggle--view-for-buffer abuf))    ; reveal T1
+      (should (gt--fullscreen-now-p b1))
+      (should (eq (ghostel-toggle--selected-session 'terminal root) t1)))))
 
 ;;; ghostel-toggle-tests.el ends here

@@ -386,7 +386,10 @@ dismisses the view outright (the home fullscreens).
 Stacked fullscreens form an explicit chain: `:under' is the registered
 view directly beneath this one (compared by `eq', nil at the bottom),
 and `:config' is a snapshot of the last real, non-fullscreen layout —
-never of a sibling fullscreen.  Hiding or demoting a view reveals its
+never of a sibling fullscreen.  `:panel-ok' travels with `:config': the
+hidden-view buffers whose panel displays existed when the snapshot was
+taken, which the restore sweep spares (see
+`ghostel-toggle--hidden-panel-buffers').  Hiding or demoting a view reveals its
 `:under' view when one is live, and restores `:config' only at the
 bottom of the stack; flipping a covered view back on top restacks the
 chain (`ghostel-toggle--show-fullscreen'), and removing a view rebases
@@ -406,6 +409,13 @@ instead of opening a side window.")
 
 (defvar ghostel-toggle--display-kind nil
   "Kind whose panel should receive a `display-buffer' during creation.")
+
+(defvar ghostel-toggle--pending-buffer nil
+  "Candidate session buffer displayed during creation, before registration.
+Captured by the display callback so a failed spawn can be cleaned up:
+the ghostel package kills the buffer only for failures inside
+`ghostel--create'; the process spawn runs after it and would leave the
+displayed candidate alive.")
 
 (defun ghostel-toggle--prune-fullscreen-views ()
   "Drop fullscreen views whose session buffer was killed."
@@ -528,6 +538,20 @@ to real content."
         (current-window-configuration))
     (current-window-configuration)))
 
+(defun ghostel-toggle--hidden-panel-buffers ()
+  "Buffers of hidden views currently displayed in a side window.
+Recorded as `:panel-ok' alongside a real-layout snapshot: these panel
+displays were opened deliberately while their views were hidden and are
+legitimate for a restore to bring back — unlike a pre-promotion panel
+fossil the snapshot may also contain, whose view's hiding must keep the
+session off-screen entirely."
+  (seq-filter (lambda (b)
+                (seq-find (lambda (w) (window-parameter w 'window-side))
+                          (get-buffer-window-list b)))
+              (mapcar (lambda (v) (plist-get v :buffer))
+                      (seq-filter (lambda (v) (plist-get v :hidden))
+                                  ghostel-toggle--fullscreen-views))))
+
 (defun ghostel-toggle--enter-fullscreen (buf &optional dismiss)
   "Expand session BUF to fill the frame, registering a fullscreen view.
 The view is keyed by BUF's session kind and root so the plain toggle key
@@ -539,6 +563,9 @@ the plain toggle key dismisses them and the home key re-fires them fresh."
          (kind (plist-get session :kind))
          (root (plist-get session :root))
          (covering (ghostel-toggle--displayed-view)))
+    ;; The promoted session becomes the displayed one; select it so
+    ;; cycling starts from the tab on screen, not from a stale sibling.
+    (ghostel-toggle--select-session session)
     ;; Entering over another fullscreen stacks on top of it: the covered
     ;; view is the reveal target, and the real-layout snapshot is
     ;; inherited from it rather than pointing at its full-frame buffer.
@@ -548,6 +575,9 @@ the plain toggle key dismisses them and the home key re-fires them fresh."
                 :config (if covering
                             (plist-get covering :config)
                           (ghostel-toggle--capture-restore-config buf))
+                :panel-ok (if covering
+                              (plist-get covering :panel-ok)
+                            (ghostel-toggle--hidden-panel-buffers))
                 :hidden nil
                 :dismiss dismiss
                 :under covering)
@@ -584,7 +614,8 @@ when unwinding."
      ((eq covering view))
      (t
       (plist-put view :under nil)
-      (plist-put view :config (ghostel-toggle--capture-restore-config buf))))
+      (plist-put view :config (ghostel-toggle--capture-restore-config buf))
+      (plist-put view :panel-ok (ghostel-toggle--hidden-panel-buffers))))
     (plist-put view :hidden nil)
     (ghostel-toggle--fill-frame buf)))
 
@@ -610,6 +641,7 @@ forms an `:under' cycle that unwinds to stale layouts."
   (dolist (child ghostel-toggle--fullscreen-views)
     (when (eq (plist-get child :under) view)
       (plist-put child :config (plist-get view :config))
+      (plist-put child :panel-ok (plist-get view :panel-ok))
       (plist-put child :under (plist-get view :under)))))
 
 (defun ghostel-toggle--view-on-display-p (view)
@@ -649,26 +681,34 @@ anchor to the tab back on screen."
     (ghostel-toggle--select-session session))
   (ghostel-toggle--fill-frame (plist-get view :buffer)))
 
+(defun ghostel-toggle--dissolve-window (win)
+  "Delete WIN, or show its previous buffer when it cannot be deleted
+\(the frame's sole/main window) instead of leaving a wedged session."
+  (if (window-deletable-p win)
+      (delete-window win)
+    (set-window-dedicated-p win nil)
+    (switch-to-prev-buffer win)))
+
 (defun ghostel-toggle--sweep-view-windows (view buf)
-  "Delete windows showing BUF or any hidden view's buffer other than VIEW's.
-A restored configuration may predate another view's hiding and resurrect
-its buffer full-frame; sweeping keeps hidden views hidden.  Windows that
-cannot be deleted (the frame's sole/main window) show their previous
-buffer instead of a wedged session.  VIEW's own kind's panel is swept
-too when it shows a session of VIEW's root: after cycling repointed the
-view, the restored panel shows the session promoted from — not BUF — and
-would slip past the buffer-keyed sweep as a stale drawer."
-  (dolist (b (cons buf
-                   (mapcar (lambda (v) (plist-get v :buffer))
-                           (seq-filter (lambda (v)
-                                         (and (not (eq v view))
-                                              (plist-get v :hidden)))
-                                       ghostel-toggle--fullscreen-views))))
-    (dolist (win (get-buffer-window-list b nil nil))
-      (if (window-deletable-p win)
-          (delete-window win)
-        (set-window-dedicated-p win nil)
-        (switch-to-prev-buffer win))))
+  "Remove leftover session windows after restoring VIEW's snapshot.
+Deletes every window showing BUF, and windows showing any other hidden
+view's buffer — a restored configuration may predate that view's hiding
+and resurrect its buffer full-frame or as a pre-promotion panel fossil.
+Side windows are spared when VIEW's snapshot recorded them as
+`:panel-ok': that panel display was opened deliberately while its view
+was already hidden and is legitimate to bring back.  VIEW's own kind's
+panel is swept too when it shows a session of VIEW's root: after
+cycling repointed the view, the restored panel shows the session
+promoted from — not BUF — and would slip past the buffer-keyed sweep
+as a stale drawer."
+  (dolist (win (get-buffer-window-list buf nil nil))
+    (ghostel-toggle--dissolve-window win))
+  (dolist (v ghostel-toggle--fullscreen-views)
+    (when (and (not (eq v view)) (plist-get v :hidden))
+      (let ((ok (memq (plist-get v :buffer) (plist-get view :panel-ok))))
+        (dolist (win (get-buffer-window-list (plist-get v :buffer) nil nil))
+          (unless (and ok (window-parameter win 'window-side))
+            (ghostel-toggle--dissolve-window win))))))
   (let ((kind (plist-get view :kind))
         (root (plist-get view :root)))
     (when (and root (ghostel-toggle--root-visible-p kind root))
@@ -737,13 +777,18 @@ view are swept too so hidden views stay hidden."
 
 (defun ghostel-toggle--fullscreen-flip (view &optional before-show)
   "Plain-toggle-key action for fullscreen VIEW (sticky fullscreen mode).
-On the session shown full-frame, hide it (collapse to the code).
-Otherwise (hidden, split, or on another buffer) re-expand the session to
-fullscreen, calling BEFORE-SHOW first when non-nil (only on the show
-path — instantiations use it to send an active region)."
-  (if (and (not (plist-get view :hidden))
-           (eq (current-buffer) (plist-get view :buffer))
-           (one-window-p t))
+On the session shown full-frame, hide it (collapse to the code) — side
+windows don't count, so a panel punched over the fullscreen doesn't turn
+the hide press into a re-expansion.  A `:dismiss' (home) view on display
+in any form, split included, is also hidden: the plain key must dismiss
+a visible home fullscreen in one press.  Otherwise (hidden, split, or on
+another buffer) re-expand the session to fullscreen, calling BEFORE-SHOW
+first when non-nil (only on the show path — instantiations use it to
+send an active region)."
+  (if (or (eq view (ghostel-toggle--current-fullscreen-view
+                    (plist-get view :kind) (plist-get view :root)))
+          (and (plist-get view :dismiss)
+               (ghostel-toggle--view-on-display-p view)))
       (ghostel-toggle--hide-fullscreen view)
     (when before-show
       (funcall before-show))
@@ -877,6 +922,7 @@ panel window of `ghostel-toggle--display-kind'."
     (when (and buffer
                (with-current-buffer buffer
                  (derived-mode-p 'ghostel-mode)))
+      (setq ghostel-toggle--pending-buffer buffer)
       (if ghostel-toggle--fullscreen-display
           ;; Display only — no view arg, and the buffer isn't registered
           ;; yet, so the view is not repointed here.  Creation can still
@@ -905,9 +951,22 @@ buffer after registration and display (e.g. to type an agent command)."
     (let ((display-buffer-overriding-action
            '((ghostel-toggle--display-buffer-in-panel)))
           (ghostel-toggle--display-kind kind)
-          (ghostel-toggle--fullscreen-display fs-view))
+          (ghostel-toggle--fullscreen-display fs-view)
+          (ghostel-toggle--pending-buffer nil))
       (let ((ghostel-buffer-name identity))
-        (setq buf (ghostel nil))))
+        (condition-case err
+            (setq buf (ghostel nil))
+          (error
+           ;; The spawn failed after ghostel's own kill-on-error scope:
+           ;; the displayed, unregistered candidate must not leak or
+           ;; squat the frame.  Re-show the view's session directly —
+           ;; going through `ghostel-toggle--show-fullscreen' would
+           ;; re-snapshot :config off the broken layout.
+           (when (buffer-live-p ghostel-toggle--pending-buffer)
+             (kill-buffer ghostel-toggle--pending-buffer))
+           (when fs-view
+             (ghostel-toggle--reveal-view fs-view))
+           (signal (car err) (cdr err))))))
     (setq session (ghostel-toggle--register-session kind root buf
                                                     :label label
                                                     :extra extra

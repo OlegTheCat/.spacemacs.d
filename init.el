@@ -32,7 +32,8 @@ This function should only modify configuration layer settings."
 
    ;; List of configuration layers to load.
    dotspacemacs-configuration-layers
-   '(csv
+   '(swift
+     csv
      html
      (typescript :variables typescript-backend 'tide)
      toml
@@ -656,12 +657,12 @@ This function is called at the very end of Spacemacs initialization."
                 import-js importmagic indent-guide info+ inspector ivy js-doc
                 js2-mode js2-refactor link-hint live-py-mode livid-mode llm
                 load-env-vars lorem-ipsum lsp-docker lsp-mode lsp-origami
-                lsp-pyright lsp-treemacs lsp-ui macrostep markdown-toc
-                material-theme mcp-server monokai-theme multi-line multi-term
-                multi-vterm multiple-cursors mwim nameless nodejs-repl nord-theme
-                nose npm-mode open-junk-file org-superstar origami overseer
-                package-lint page-break-lines paradox password-generator pcre2el
-                persistent-scratch pet pip-requirements pipenv pippel plz
+                lsp-pyright lsp-sourcekit lsp-treemacs lsp-ui macrostep
+                markdown-toc material-theme mcp-server monokai-theme multi-line
+                multi-term multi-vterm multiple-cursors mwim nameless nodejs-repl
+                nord-theme nose npm-mode open-junk-file org-superstar origami
+                overseer package-lint page-break-lines paradox password-generator
+                pcre2el persistent-scratch pet pip-requirements pipenv pippel plz
                 plz-event-source plz-media-type poetry popwin pos-tip prettier-js
                 pug-mode py-isort pydoc pyenv-mode pylookup python-pytest pythonic
                 pyvenv quickrun rainbow-delimiters reformatter restart-emacs
@@ -669,13 +670,13 @@ This function is called at the very end of Spacemacs initialization."
                 shell-pop simple-httpd skewer-mode slim-mode smeargle
                 solarized-theme space-doc spaceline spacemacs-purpose-popwin
                 spacemacs-whitespace-cleanup sphinx-doc string-edit-at-point
-                string-inflection swiper symbol-overlay symon tagedit term-cursor
-                terminal-here tern toc-org toml-mode treemacs-icons-dired
-                treemacs-magit treemacs-persp treemacs-projectile typescript-mode
-                undo-fu-session unfill uuidgen uv vdiff vi-tilde-fringe
-                volatile-highlights vundo web-beautify web-completion-data
-                web-mode wgrep winum writeroom-mode ws-butler xcscope yaml-mode
-                yapfify yasnippet-snippets zenburn-theme))
+                string-inflection swift-mode swiper symbol-overlay symon tagedit
+                term-cursor terminal-here tern toc-org toml-mode
+                treemacs-icons-dired treemacs-magit treemacs-persp
+                treemacs-projectile typescript-mode undo-fu-session unfill uuidgen
+                uv vdiff vi-tilde-fringe volatile-highlights vundo web-beautify
+                web-completion-data web-mode wgrep winum writeroom-mode ws-butler
+                xcscope yaml-mode yapfify yasnippet-snippets zenburn-theme))
    '(safe-local-variable-values
      '((web-mode-indent-style . 2) (web-mode-block-padding . 2)
        (web-mode-script-padding . 2) (web-mode-style-padding . 2)

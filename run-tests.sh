@@ -6,8 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 exec emacs -batch -l ert \
+  -l config/ghostel.el \
   -l config/ghostel-toggle.el \
   -l config/ghostel-terminals.el \
   -l config/ghostel-agents.el \
+  -l config/ghostel-tests.el \
   -l config/ghostel-toggle-tests.el \
   --eval "(ert-run-tests-batch-and-exit \"${1:-t}\")"

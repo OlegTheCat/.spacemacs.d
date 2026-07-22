@@ -1,7 +1,22 @@
 ;;; ghostel.el --- Generic Ghostel tweaks -*- lexical-binding: t -*-
 
+(defun my/ghostel-keep-spinner-mode-line-as-list (&rest _)
+  "Keep Ghostel's singleton spinner compatible with Spaceline.
+Ghostel collapses a sole `spinner--mode-line-construct' component to a
+bare symbol.  Restore spinner.el's sequence-form mode-line shape."
+  (when (eq mode-line-process 'spinner--mode-line-construct)
+    (setq mode-line-process '("" spinner--mode-line-construct))))
+
 (with-eval-after-load 'ghostel
   (require 'flash)
+
+  ;; Preserve spinner.el's original list shape after Ghostel recomposes
+  ;; `mode-line-process'; otherwise Spaceline passes the bare symbol to
+  ;; `concat'.
+  (advice-remove 'ghostel--mode-line-refresh
+                 #'my/ghostel-keep-spinner-mode-line-as-list)
+  (advice-add 'ghostel--mode-line-refresh :after
+              #'my/ghostel-keep-spinner-mode-line-as-list)
 
   ;; Replace ⏺ (U+23FA) with ● (U+25CF) in ghostel output before rendering,
   ;; because STIX Two Math renders ⏺ with broken descent metrics.

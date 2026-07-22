@@ -83,7 +83,17 @@
 
 ;; Flash jump
 (require 'flash)
-(global-set-key (kbd "s-j") 'flash-jump)
+
+(defun my/flash-jump ()
+  "Jump with Flash, including the match when a region is active."
+  (interactive)
+  (let ((flash-jump-position
+         (if (region-active-p)
+             'end
+           flash-jump-position)))
+    (call-interactively #'flash-jump)))
+
+(global-set-key (kbd "s-j") #'my/flash-jump)
 
 ;; GPTel: use Claude as default backend
 (with-eval-after-load 'gptel

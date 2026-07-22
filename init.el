@@ -75,7 +75,8 @@ This function should only modify configuration layer settings."
    ;; `dotspacemacs/user-config'. To use a local version of a package, use the
    ;; `:location' property: '(your-package :location "~/path/to/your-package/")
    ;; Also include the dependencies as they will not be resolved automatically.
-   dotspacemacs-additional-packages '(agent-shell
+   dotspacemacs-additional-packages '(pr-review
+                                      agent-shell
                                       (agent-shell-sidebar
                                        :location
                                        (recipe :fetcher github
@@ -611,7 +612,8 @@ before packages are loaded."
                  "quick-diff"
                  "ghostel"
                  "ghostel-terminals"
-                 "ghostel-agents"))
+                 "ghostel-agents"
+                 "pr-review"))
       (load (expand-file-name f config-dir)))))
 
 
@@ -628,55 +630,52 @@ This function is called at the very end of Spacemacs initialization."
    ;; Your init file should contain only one such instance.
    ;; If there is more than one, they won't work right.
    '(package-selected-packages
-     '(ace-link acp add-node-modules-path agent-shell aggressive-indent all-the-icons
-                anaconda-mode auto-compile auto-highlight-symbol auto-yasnippet
-                autothemer avy-jump-helm-line beacon blacken browse-at-remote bui
-                centered-cursor-mode clean-aindent-mode code-cells
-                column-enforce-mode company-anaconda company-web concurrent
-                counsel counsel-css csv-mode ctable cython-mode dap-mode deferred
-                define-word devdocs diff-hl diminish dired-quick-sort
-                disable-mouse doom-themes dotenv-mode dracula-theme drag-stuff
-                dumb-jump eat edit-indirect elisp-def elisp-demos elisp-slime-nav
-                ellama emmet-mode emr epc esh-help eshell-prompt-extras eshell-z
-                eval-sexp-fu evil-anzu evil-args evil-cleverparens evil-escape
-                evil-evilified-state evil-exchange evil-goggles evil-iedit-state
-                evil-indent-plus evil-lion evil-lisp-state evil-matchit
-                evil-nerd-commenter evil-numbers evil-surround evil-textobj-line
-                evil-tutor evil-unimpaired evil-visual-mark-mode evil-visualstar
-                expand-region eyebrowse fancy-battery flash flycheck flycheck-elsa
-                flycheck-package flycheck-pos-tip forge ggtags gh-md ghostel
-                git-link git-messenger git-modes git-timemachine
-                gitignore-templates golden-ratio golden-ratio-scroll-screen
-                google-translate gptel grizzl gruvbox-theme haml-mode helm-ag
-                helm-c-yasnippet helm-cider helm-comint helm-company helm-cscope
-                helm-css-scss helm-descbinds helm-ls-git helm-lsp helm-make
-                helm-mode-manager helm-org helm-projectile helm-purpose helm-pydoc
-                helm-swoop helm-xref hide-comnt highlight-indentation
-                highlight-numbers highlight-parentheses highlight-symbol hl-todo
-                holy-mode htmlize hungry-delete hybrid-mode impatient-mode
-                import-js importmagic indent-guide info+ inspector ivy js-doc
-                js2-mode js2-refactor link-hint live-py-mode livid-mode llm
-                load-env-vars lorem-ipsum lsp-docker lsp-mode lsp-origami
-                lsp-pyright lsp-sourcekit lsp-treemacs lsp-ui macrostep
-                markdown-toc material-theme mcp-server monokai-theme multi-line
-                multi-term multi-vterm multiple-cursors mwim nameless nodejs-repl
-                nord-theme nose npm-mode open-junk-file org-superstar origami
-                overseer package-lint page-break-lines paradox password-generator
-                pcre2el persistent-scratch pet pip-requirements pipenv pippel plz
-                plz-event-source plz-media-type poetry popwin pos-tip prettier-js
-                pug-mode py-isort pydoc pyenv-mode pylookup python-pytest pythonic
-                pyvenv quickrun rainbow-delimiters reformatter restart-emacs
-                restclient reverse-im ruff-format sass-mode scss-mode shell-maker
-                shell-pop simple-httpd skewer-mode slim-mode smeargle
-                solarized-theme space-doc spaceline spacemacs-purpose-popwin
-                spacemacs-whitespace-cleanup sphinx-doc string-edit-at-point
-                string-inflection swift-mode swiper symbol-overlay symon tagedit
-                term-cursor terminal-here tern toc-org toml-mode
-                treemacs-icons-dired treemacs-magit treemacs-persp
-                treemacs-projectile typescript-mode undo-fu-session unfill uuidgen
-                uv vdiff vi-tilde-fringe volatile-highlights vundo web-beautify
-                web-completion-data web-mode wgrep winum writeroom-mode ws-butler
-                xcscope yaml-mode yapfify yasnippet-snippets zenburn-theme))
+     '(a ace-link acp add-node-modules-path agent-shell aggressive-indent
+         all-the-icons anaconda-mode auto-compile auto-highlight-symbol
+         auto-yasnippet autothemer avy-jump-helm-line beacon blacken
+         browse-at-remote bui centered-cursor-mode clean-aindent-mode code-cells
+         code-review column-enforce-mode company-anaconda company-web concurrent
+         counsel counsel-css csv-mode ctable cython-mode dap-mode deferred
+         define-word devdocs diff-hl diminish dired-quick-sort disable-mouse
+         doom-themes dotenv-mode dracula-theme drag-stuff dumb-jump eat
+         edit-indirect elisp-def elisp-demos elisp-slime-nav ellama emmet-mode
+         emojify emr epc esh-help eshell-prompt-extras eshell-z eval-sexp-fu
+         evil-anzu evil-args evil-cleverparens evil-escape evil-evilified-state
+         evil-exchange evil-goggles evil-iedit-state evil-indent-plus evil-lion
+         evil-lisp-state evil-matchit evil-nerd-commenter evil-numbers
+         evil-surround evil-textobj-line evil-tutor evil-unimpaired
+         evil-visual-mark-mode evil-visualstar expand-region eyebrowse
+         fancy-battery flash flycheck flycheck-elsa flycheck-package
+         flycheck-pos-tip forge ggtags gh-md ghostel git-link git-messenger
+         git-modes git-timemachine gitignore-templates golden-ratio
+         golden-ratio-scroll-screen google-translate gptel grizzl gruvbox-theme
+         haml-mode helm-ag helm-c-yasnippet helm-cider helm-comint helm-company
+         helm-cscope helm-css-scss helm-descbinds helm-ls-git helm-lsp helm-make
+         helm-mode-manager helm-org helm-projectile helm-purpose helm-pydoc
+         helm-swoop helm-xref hide-comnt highlight-indentation highlight-numbers
+         highlight-parentheses highlight-symbol hl-todo holy-mode htmlize
+         hungry-delete hybrid-mode impatient-mode import-js importmagic
+         indent-guide info+ inspector ivy js-doc js2-mode js2-refactor link-hint
+         live-py-mode livid-mode llm load-env-vars lorem-ipsum lsp-docker lsp-mode
+         lsp-origami lsp-pyright lsp-sourcekit lsp-treemacs lsp-ui macrostep
+         markdown-toc material-theme mcp-server monokai-theme multi-line
+         multi-term multi-vterm multiple-cursors mwim nameless nodejs-repl
+         nord-theme nose npm-mode open-junk-file org-superstar origami overseer
+         package-lint page-break-lines paradox password-generator pcre2el
+         persistent-scratch pet pip-requirements pipenv pippel plz
+         plz-event-source plz-media-type poetry popwin pos-tip pr-review
+         prettier-js pug-mode py-isort pydoc pyenv-mode pylookup python-pytest
+         pythonic pyvenv quickrun rainbow-delimiters reformatter restart-emacs
+         restclient reverse-im ruff-format sass-mode scss-mode shell-maker
+         shell-pop simple-httpd skewer-mode slim-mode smeargle solarized-theme
+         space-doc spaceline spacemacs-purpose-popwin spacemacs-whitespace-cleanup
+         sphinx-doc string-edit-at-point string-inflection swift-mode swiper
+         symbol-overlay symon tagedit term-cursor terminal-here tern toc-org
+         toml-mode treemacs-icons-dired treemacs-magit treemacs-persp
+         treemacs-projectile typescript-mode undo-fu-session unfill uuidgen uv
+         vdiff vi-tilde-fringe volatile-highlights vundo web-beautify
+         web-completion-data web-mode wgrep winum writeroom-mode ws-butler xcscope
+         yaml-mode yapfify yasnippet-snippets zenburn-theme))
    '(safe-local-variable-values
      '((web-mode-indent-style . 2) (web-mode-block-padding . 2)
        (web-mode-script-padding . 2) (web-mode-style-padding . 2)

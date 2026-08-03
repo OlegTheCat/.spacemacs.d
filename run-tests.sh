@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Run the local ERT suites headless.
 # Usage: ./run-tests.sh [ert-selector]   e.g. ./run-tests.sh "gtx-.*"
-# Section prefixes: adaptive-scroll-, gtl- (library), gta- (agents),
-# gtt- (terminals), gtx- (cross-kind).
+# Section prefixes: projectile-cache-, adaptive-scroll-, gtl- (library),
+# gta- (agents), gtt- (terminals), gtx- (cross-kind).
 set -euo pipefail
 cd "$(dirname "$0")"
 exec emacs -batch -l ert \
+  -l config/projectile-cache.el \
+  -l config/projectile-cache-tests.el \
   -l config/adaptive-scroll.el \
   -l config/adaptive-scroll-tests.el \
   -l config/ghostel.el \

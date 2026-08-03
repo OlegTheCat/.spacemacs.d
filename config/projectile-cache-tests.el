@@ -1,0 +1,47 @@
+;;; projectile-cache-tests.el --- Tests for Projectile cache config -*- lexical-binding: t -*-
+
+(require 'ert)
+(require 'cl-lib)
+
+(ert-deftest projectile-cache-settings-use-one-hour-transient-cache ()
+  (should (eq projectile-enable-caching t))
+  (should (= projectile-files-cache-expire 3600)))
+
+(ert-deftest projectile-cache-find-file-without-prefix-keeps-cache ()
+  (let (events seen-prefix)
+    (cl-letf (((symbol-function 'projectile-invalidate-cache)
+               (lambda (&rest _) (push 'invalidate events)))
+              ((symbol-function 'helm-projectile-find-file)
+               (lambda ()
+                 (interactive)
+                 (setq seen-prefix current-prefix-arg)
+                 (push 'search events))))
+      (let ((current-prefix-arg nil))
+        (call-interactively #'my/helm-projectile-find-file)))
+    (should (equal (nreverse events) '(search)))
+    (should-not seen-prefix)))
+
+(ert-deftest projectile-cache-find-file-with-prefix-invalidates-first ()
+  (let (events seen-prefix)
+    (cl-letf (((symbol-function 'projectile-invalidate-cache)
+               (lambda (prompt)
+                 (push (list 'invalidate prompt) events)))
+              ((symbol-function 'helm-projectile-find-file)
+               (lambda ()
+                 (interactive)
+                 (setq seen-prefix current-prefix-arg)
+                 (push 'search events))))
+      (let ((current-prefix-arg '(4)))
+        (call-interactively #'my/helm-projectile-find-file)))
+    (should (equal (nreverse events) '((invalidate nil) search)))
+    (should-not seen-prefix)))
+
+(ert-deftest projectile-cache-binds-project-file-search-wrapper ()
+  (let (binding)
+    (cl-letf (((symbol-function 'spacemacs/set-leader-keys)
+               (lambda (key command)
+                 (setq binding (list key command)))))
+      (my/projectile-cache-bind-keys))
+    (should (equal binding '("pf" my/helm-projectile-find-file)))))
+
+;;; projectile-cache-tests.el ends here

@@ -606,6 +606,7 @@ Put your configuration code here, except for variables that should be set
 before packages are loaded."
   (let ((config-dir (expand-file-name "config/" (file-name-directory dotspacemacs-filepath))))
     (dolist (f '("editor"
+                 "projectile-cache"
                  "adaptive-scroll"
                  "ghostel-toggle"
                  "agent-shell-config"

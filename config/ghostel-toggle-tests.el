@@ -1511,6 +1511,98 @@ s-t parses prefixes)."
       (ghostel-agent-quote-region (point-min) (point-max)))
     (should (equal gt--last-paste "> para one\n>\n> para two\n\n"))))
 
+;;; --- paired backticks ---------------------------------------------------------
+
+(defmacro gta-with-fake-agent-input (&rest body)
+  "Run BODY against a small editable model of a Ghostel agent prompt."
+  (declare (indent 0) (debug t))
+  `(with-temp-buffer
+     (let (gta--input-events)
+       (cl-letf (((symbol-function 'ghostel-send-string)
+                  (lambda (string)
+                    (push (list :send string) gta--input-events)
+                    (insert string)))
+                 ((symbol-function 'ghostel-paste-string)
+                  (lambda (string)
+                    (push (list :paste string) gta--input-events)
+                    (insert string)))
+                 ((symbol-function 'ghostel-send-key)
+                  (lambda (key &optional _mods)
+                    (push (list :key key) gta--input-events)
+                    (pcase key
+                      ("left" (backward-char))
+                      ("right" (forward-char))
+                      (_ (ert-fail (format "Unexpected test key: %s" key)))))))
+         ,@body))))
+
+(ert-deftest gta-backtick-single-opens-inline-pair ()
+  "One backtick leaves point between an inline pair."
+  (gta-with-fake-agent-input
+    (let ((last-command nil))
+      (ghostel-agent-backtick-dwim nil))
+    (should (equal (buffer-string) "``"))
+    (should (= (point) (1+ (point-min))))
+    (should (= ghostel-agent--pending-backticks 1))))
+
+(ert-deftest gta-backtick-three-presses-open-fenced-block ()
+  "Three consecutive backticks create a fenced block with point inside."
+  (gta-with-fake-agent-input
+    (let ((last-command nil))
+      (ghostel-agent-backtick-dwim nil))
+    (dotimes (_ 2)
+      (let ((last-command 'ghostel-agent-backtick-dwim))
+        (ghostel-agent-backtick-dwim nil)))
+    (should (equal (buffer-string) "```\n\n```"))
+    (should (equal (buffer-substring (point-min) (point)) "```\n"))
+    (should (equal (buffer-substring (point) (point-max)) "\n```"))
+    ;; Newlines must arrive as bracketed paste so agent TUIs do not submit them.
+    (should (member (list :paste "`\n\n`") gta--input-events))
+    (insert "bar")
+    (let ((last-command 'ghostel--self-insert))
+      (ghostel-agent-backtick-dwim nil))
+    (should (equal (buffer-string) "```\nbar\n```"))
+    (should (= (point) (point-max)))
+    (should-not ghostel-agent--pending-backticks)))
+
+(ert-deftest gta-backtick-after-inline-text-skips-generated-closer ()
+  "A backtick after inline content moves over, rather than duplicates, the closer."
+  (gta-with-fake-agent-input
+    (let ((last-command nil))
+      (ghostel-agent-backtick-dwim nil))
+    (insert "foo")
+    (let ((last-command 'ghostel--self-insert))
+      (ghostel-agent-backtick-dwim nil))
+    (should (equal (buffer-string) "`foo`"))
+    (should (= (point) (point-max)))
+    (should-not ghostel-agent--pending-backticks)))
+
+(ert-deftest gta-backtick-prefix-inserts-one-literal ()
+  "A prefix argument bypasses pairing and sends one literal backtick."
+  (gta-with-fake-agent-input
+    (let ((last-command nil))
+      (ghostel-agent-backtick-dwim '(4)))
+    (should (equal (buffer-string) "`"))
+    (should (= (point) (point-max)))
+    (should-not ghostel-agent--pending-backticks)))
+
+(ert-deftest gta-backtick-navigation-clears-generated-closer-state ()
+  "Typing preserves a pending closer, while a cursor-moving command clears it."
+  (gta-with-fake-agent-input
+    (let ((last-command nil))
+      (ghostel-agent-backtick-dwim nil))
+    (let ((this-command 'ghostel--self-insert))
+      (ghostel-agent--reset-backticks-after-command))
+    (should (= ghostel-agent--pending-backticks 1))
+    (let ((this-command 'ghostel--send-event))
+      (ghostel-agent--reset-backticks-after-command))
+    (should-not ghostel-agent--pending-backticks)))
+
+(ert-deftest gta-backtick-agent-key-binding ()
+  "Only the managed agent keymap opts into paired backticks."
+  (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "`"))
+              'ghostel-agent-backtick-dwim))
+  (should-not (lookup-key ghostel-terminal-session-mode-map (kbd "`"))))
+
 (ert-deftest gta-session-mode-map-bindings ()
   "The agent session keymap wires s-c and s-'; s-t stays global (prefix-aware)."
   (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-c"))

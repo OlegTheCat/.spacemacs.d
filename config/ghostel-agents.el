@@ -43,6 +43,87 @@
   :lighter nil
   :keymap ghostel-agent-session-mode-map)
 
+;;; Optional paired backticks
+;;;
+;;; Comment out the `define-key' at the end of this section to restore
+;;; Ghostel's normal one-backtick-per-keypress behavior.
+
+(defvar-local ghostel-agent--pending-backticks nil
+  "Number of generated closing backticks still ahead of the cursor.")
+
+(defvar-local ghostel-agent--backticks-expandable nil
+  "Non-nil while consecutive backtick presses may grow the current pair.")
+
+(defun ghostel-agent--send-key-n (key count)
+  "Send Ghostel KEY COUNT times."
+  (dotimes (_ count)
+    (ghostel-send-key key)))
+
+(defun ghostel-agent--reset-backticks-after-command ()
+  "Forget a generated closer after commands that may move the terminal cursor."
+  (unless (memq this-command
+                '(ghostel-agent-backtick-dwim
+                  ghostel--self-insert
+                  ghostel-yank
+                  ghostel-yank-pop
+                  universal-argument
+                  universal-argument-more
+                  digit-argument
+                  negative-argument))
+    (setq ghostel-agent--pending-backticks nil
+          ghostel-agent--backticks-expandable nil)))
+
+(defun ghostel-agent-backtick-dwim (&optional literal)
+  "Insert paired backticks in a managed Ghostel agent prompt.
+
+One press inserts an inline pair and leaves the cursor between it.
+Three consecutive presses turn that pair into a fenced block with a blank
+line for input.  After typing inside either form, another press skips its
+generated closer.  With prefix argument LITERAL, insert one backtick."
+  (interactive "P")
+  (add-hook 'post-command-hook
+            #'ghostel-agent--reset-backticks-after-command nil t)
+  (cond
+   (literal
+    (setq ghostel-agent--backticks-expandable nil)
+    (ghostel-send-string "`"))
+   ((and ghostel-agent--backticks-expandable
+         (eq last-command 'ghostel-agent-backtick-dwim)
+         (eq ghostel-agent--pending-backticks 1))
+    ;; Grow `|' into ``|``; a third press handles the fenced-block case.
+    (ghostel-send-string "`")
+    (ghostel-send-key "right")
+    (ghostel-send-string "`")
+    (ghostel-agent--send-key-n "left" 2)
+    (setq ghostel-agent--pending-backticks 2))
+   ((and ghostel-agent--backticks-expandable
+         (eq last-command 'ghostel-agent-backtick-dwim)
+         (eq ghostel-agent--pending-backticks 2))
+    ;; Starting from ``|``, add the outer ticks and blank fenced-block line.
+    ;; Bracketed paste keeps the embedded newlines from submitting the prompt.
+    (ghostel-paste-string "`\n\n`")
+    (ghostel-agent--send-key-n "left" 2)
+    (setq ghostel-agent--pending-backticks 3
+          ghostel-agent--backticks-expandable nil))
+   (ghostel-agent--pending-backticks
+    ;; A fenced closer also has its leading newline ahead of the cursor.
+    (ghostel-agent--send-key-n
+     "right"
+     (if (= ghostel-agent--pending-backticks 3)
+         4
+       ghostel-agent--pending-backticks))
+    (setq ghostel-agent--pending-backticks nil
+          ghostel-agent--backticks-expandable nil))
+   (t
+    (ghostel-send-string "``")
+    (ghostel-send-key "left")
+    (setq ghostel-agent--pending-backticks 1
+          ghostel-agent--backticks-expandable t))))
+
+;; This is the only line to comment out if the behavior does not stick.
+(define-key ghostel-agent-session-mode-map (kbd "`")
+            #'ghostel-agent-backtick-dwim)
+
 (defun ghostel-agent--on-select (session)
   "Record SESSION as its agent's last session for the project.
 Also prunes entries whose sessions died."

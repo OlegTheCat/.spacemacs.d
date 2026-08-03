@@ -276,21 +276,32 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
         (when-let* ((session (ghostel-agent--last-session-for-agent agent root)))
           (ghostel-toggle--session-buffer session)))))
 
+(defun ghostel-agent--ensure-home-buffer (agent root resume)
+  "Return the home agent buffer selected by AGENT and RESUME.
+With no explicit AGENT, reuse the selected live session in ROOT; create a
+Claude session only when ROOT has no session to reuse."
+  (or (and (null agent)
+           (when-let* ((session (ghostel-toggle--default-session 'agent root)))
+             (ghostel-toggle--session-buffer session)))
+      (ghostel-agent--ensure-buffer (or agent 'claude) root resume)))
+
 (defun ghostel-agent-home-toggle (arg)
   "Toggle a fullscreen agent session rooted in the home directory.
-Prefix ARG follows `ghostel-agent-toggle-command' conventions: plain =
-Claude, `C-u' = Claude resume, `C-2' = Codex, `C-3' = Codex resume.
+Without a prefix, reuse the selected home agent, creating Claude when no
+home session exists.  Prefix ARG otherwise follows
+`ghostel-agent-toggle-command' conventions: `C-u' = Claude resume,
+`C-2' = Codex, `C-3' = Codex resume.
 Promotes the home (~/) agent to fullscreen from any project; press again
 to restore the previous layout.  The home fullscreen also dismisses with
 plain `s-l' (it is registered `:dismiss', so `s-l' dismisses it and
 C-s-l re-fires it)."
   (interactive "P")
   (let* ((parsed (ghostel-agent--parse-prefix arg))
-         (agent (or (car parsed) 'claude))
+         (agent (car parsed))
          (resume (cadr parsed)))
     (ghostel-toggle-home-toggle
      'agent
-     (lambda (root) (ghostel-agent--ensure-buffer agent root resume)))))
+     (lambda (root) (ghostel-agent--ensure-home-buffer agent root resume)))))
 
 ;;; Console output cleanup (s-c / s-')
 

@@ -1104,6 +1104,28 @@ sticky-hidden), so C-s-l re-fires it afterwards."
       (ghostel-agent-home-toggle nil)               ; C-s-l re-fires it
       (should (gt--fullscreen-now-p homebuf)))))
 
+(ert-deftest gta-win-home-toggle-reuses-dismissed-prefixed-agent ()
+  "C-2 C-s-l -> s-l -> C-s-l re-fires the existing home Codex session.
+The unprefixed home toggle must not create and show a new Claude session."
+  (gt-with-env
+    (let* ((home (ghostel-toggle--normalize-root "~/"))
+           (proj "/tmp/projA/"))
+      (gt--show-code proj)
+      (ghostel-agent-home-toggle 2)                 ; C-2 C-s-l -> Codex
+      (let* ((codex (ghostel-agent--last-session-for-agent 'codex home))
+             (codexbuf (plist-get codex :buffer)))
+        (should (eq (plist-get (ghostel-toggle--current-session 'agent) :agent)
+                    'codex))
+        (should (gt--fullscreen-now-p codexbuf))
+        (ghostel-agent-toggle-command nil)          ; s-l -> dismiss
+        (should-not (get-buffer-window codexbuf))
+        (ghostel-agent-home-toggle nil)             ; C-s-l -> same Codex
+        (should (eq (plist-get (ghostel-toggle--current-session 'agent) :agent)
+                    'codex))
+        (should (gt--fullscreen-now-p codexbuf))
+        (should (= (length (ghostel-toggle--sessions-for-root 'agent home))
+                   1))))))
+
 (ert-deftest gta-win-exit-fullscreen-restores-splits ()
   "s-<return> twice (enter then exit) restores the pre-fullscreen splits and
 returns the agent to the sidebar (exit, unlike hide, keeps the agent shown)."

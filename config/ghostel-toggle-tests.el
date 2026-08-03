@@ -1247,7 +1247,7 @@ hide returns to the split that existed at re-show time, not the original."
 
 (ert-deftest gta-win-send-region-formats-with-file-context ()
   "`--send-region' prefixes the project-relative path and line range, then
-fences the text."
+fences the text and leaves a blank line for continuing the prompt."
   (gt-with-env
     (let* ((root "/tmp/projA/")
            (s (gta--register 'claude root))
@@ -1261,7 +1261,8 @@ fences the text."
                    (lambda (&rest _) "/tmp/projA/")))
           (ghostel-agent--send-region (plist-get s :buffer))))
       (should (string-prefix-p "foo.js:1-3\n```\n" gt--last-paste))
-      (should (string-match-p "line1" gt--last-paste)))))
+      (should (string-match-p "line1" gt--last-paste))
+      (should (string-suffix-p "```\n\n" gt--last-paste)))))
 
 ;;; --- C. multi-project independence ---------------------------------------------
 

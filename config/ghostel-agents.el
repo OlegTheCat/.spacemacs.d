@@ -132,7 +132,8 @@ HIDDEN is non-nil, create without touching the current window layout."
       (apply #'ghostel-toggle-create-session 'agent root args))))
 
 (defun ghostel-agent--send-region (buf)
-  "Send the active region with file context to the ghostel agent BUF."
+  "Send the active region with file context to the ghostel agent BUF.
+Leave a blank line after the pasted block for continuing the prompt."
   (let* ((beg (region-beginning))
          (end (region-end))
          (text (buffer-substring-no-properties beg end))
@@ -142,7 +143,8 @@ HIDDEN is non-nil, create without touching the current window layout."
                  (if root (file-relative-name f root) f)))
          (line-beg (line-number-at-pos beg))
          (line-end (line-number-at-pos end))
-         (formatted (format "%s:%d-%d\n```\n%s\n```" file line-beg line-end text)))
+         (formatted (format "%s:%d-%d\n```\n%s\n```\n\n"
+                            file line-beg line-end text)))
     (deactivate-mark)
     (with-current-buffer buf
       (ghostel-paste-string formatted))))

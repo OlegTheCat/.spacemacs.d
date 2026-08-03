@@ -41,9 +41,10 @@ Reversal adds a level (shrinks step), same direction removes one (grows step)."
   ;; visible page — and do that via `set-window-start' (redisplay's fast path),
   ;; not by moving point off-screen, which forces a full-window relayout every
   ;; press (~70ms, a hang on heavy-markup ghostel buffers under load).
-  (let* ((lines (adaptive-scroll--step-lines))
+  (let* ((win (selected-window))
+         (lines (adaptive-scroll--step-lines))
          (target (save-excursion
-                   (forward-visible-line (if (eq direction 'down) lines (- lines)))
+                   (vertical-motion (if (eq direction 'down) lines (- lines)) win)
                    (point))))
     (cond
      ;; Target still on-screen: just move the cursor, leave the window put.
@@ -51,14 +52,14 @@ Reversal adds a level (shrinks step), same direction removes one (grows step)."
       (goto-char target))
      ;; Scrolling up past the top: put the target on the first line.
      ((eq direction 'up)
-      (set-window-start (selected-window) target)
+      (set-window-start win target)
       (goto-char target))
      ;; Scrolling down past the bottom: put the target on the last line.
      (t
-      (set-window-start (selected-window)
+      (set-window-start win
                         (save-excursion
                           (goto-char target)
-                          (forward-visible-line (- (1- (window-text-height))))
+                          (vertical-motion (- (1- (window-text-height))) win)
                           (point)))
       (goto-char target)))))
 

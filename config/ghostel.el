@@ -49,11 +49,11 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
   (define-key ghostel-semi-char-mode-map (kbd "<wheel-up>") #'ghostel-enter-copy-mode-and-mwheel-scroll)
 
   (defun ghostel-copy-mode-flash-jump ()
-    "Enter Ghostel copy mode if needed, then start `flash-jump'."
+    "Enter Ghostel copy mode if needed, then start `my/flash-jump'."
     (interactive)
     (unless (eq ghostel--input-mode 'copy)
       (ghostel-copy-mode))
-    (call-interactively #'flash-jump))
+    (call-interactively #'my/flash-jump))
 
   (define-key ghostel-mode-map (kbd "s-j") #'ghostel-copy-mode-flash-jump)
   (define-key ghostel-readonly-mode-map (kbd "s-j") #'ghostel-copy-mode-flash-jump)

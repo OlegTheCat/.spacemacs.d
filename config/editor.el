@@ -44,17 +44,6 @@
 ;; Persistent scratch
 (persistent-scratch-setup-default)
 
-;; Projectile
-(defun my/projectile-switch-to-last-buffer-or-search ()
-  "Switch to the project's most recent buffer, or open Helm when none exists."
-  (let ((buffer (car (projectile-project-buffers-non-visible))))
-    (if buffer
-        (switch-to-buffer buffer nil t)
-      (helm-projectile))))
-
-(setq projectile-switch-project-action
-      #'my/projectile-switch-to-last-buffer-or-search)
-
 ;; Smartparens
 (with-eval-after-load 'smartparens
   (sp-use-paredit-bindings)

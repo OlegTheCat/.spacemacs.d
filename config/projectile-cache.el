@@ -49,7 +49,8 @@ Interactively, use plain `M-h p f' for the cached search and
 (defun my/projectile-cache-bind-keys ()
   "Install custom Projectile bindings."
   (spacemacs/set-leader-keys "pf" #'my/helm-projectile-find-file)
-  (global-set-key (kbd "s-p") #'helm-projectile-switch-project))
+  (global-set-key (kbd "s-p") #'helm-projectile-switch-project)
+  (global-set-key (kbd "s-f") #'my/helm-projectile-find-file))
 
 (with-eval-after-load 'helm-projectile
   (my/projectile-cache-bind-keys))

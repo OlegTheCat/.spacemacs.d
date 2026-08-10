@@ -52,6 +52,12 @@
                          (list (kbd "s-f")
                                'my/helm-projectile-find-file))))))
 
+(ert-deftest projectile-cache-installs-global-bindings-on-module-load ()
+  (should (eq (global-key-binding (kbd "s-p"))
+              'helm-projectile-switch-project))
+  (should (eq (global-key-binding (kbd "s-f"))
+              'my/helm-projectile-find-file)))
+
 (ert-deftest projectile-cache-switch-project-prefers-existing-buffer ()
   (let (switched-buffer)
     (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)

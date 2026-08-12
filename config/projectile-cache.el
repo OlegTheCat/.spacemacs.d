@@ -52,7 +52,8 @@ Interactively, use plain `M-h p f' for the cached search and
     (spacemacs/set-leader-keys "pf" #'my/helm-projectile-find-file))
   (global-set-key (kbd "s-p") #'helm-projectile-switch-project)
   (global-set-key (kbd "s-f") #'my/helm-projectile-find-file)
-  (global-set-key (kbd "s-s") #'spacemacs/helm-project-smart-do-search))
+  (global-set-key (kbd "s-s") #'spacemacs/helm-project-smart-do-search)
+  (global-set-key (kbd "s-g") #'magit-status))
 
 (my/projectile-cache-bind-keys)
 

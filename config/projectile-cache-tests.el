@@ -52,7 +52,9 @@
                          (list (kbd "s-f")
                                'my/helm-projectile-find-file)
                          (list (kbd "s-s")
-                               'spacemacs/helm-project-smart-do-search))))))
+                               'spacemacs/helm-project-smart-do-search)
+                         (list (kbd "s-g")
+                               'magit-status))))))
 
 (ert-deftest projectile-cache-installs-global-bindings-on-module-load ()
   (should (eq (global-key-binding (kbd "s-p"))
@@ -60,7 +62,9 @@
   (should (eq (global-key-binding (kbd "s-f"))
               'my/helm-projectile-find-file))
   (should (eq (global-key-binding (kbd "s-s"))
-              'spacemacs/helm-project-smart-do-search)))
+              'spacemacs/helm-project-smart-do-search))
+  (should (eq (global-key-binding (kbd "s-g"))
+              'magit-status)))
 
 (ert-deftest projectile-cache-switch-project-prefers-existing-buffer ()
   (let (switched-buffer)

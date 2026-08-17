@@ -76,11 +76,6 @@ This function should only modify configuration layer settings."
    ;; `:location' property: '(your-package :location "~/path/to/your-package/")
    ;; Also include the dependencies as they will not be resolved automatically.
    dotspacemacs-additional-packages '(pr-review
-                                      agent-shell
-                                      (agent-shell-sidebar
-                                       :location
-                                       (recipe :fetcher github
-                                               :repo "cmacrae/agent-shell-sidebar"))
                                       persistent-scratch
                                       highlight-symbol
                                       reverse-im
@@ -602,7 +597,6 @@ before packages are loaded."
                  "projectile-cache"
                  "adaptive-scroll"
                  "ghostel-toggle"
-                 "agent-shell-config"
                  "quick-diff"
                  "ghostel"
                  "ghostel-terminals"
@@ -624,7 +618,7 @@ This function is called at the very end of Spacemacs initialization."
    ;; Your init file should contain only one such instance.
    ;; If there is more than one, they won't work right.
    '(package-selected-packages
-     '(a ace-link acp add-node-modules-path agent-shell aggressive-indent
+     '(a ace-link acp add-node-modules-path aggressive-indent
          all-the-icons anaconda-mode auto-compile auto-highlight-symbol
          auto-yasnippet autothemer avy-jump-helm-line beacon blacken
          browse-at-remote bui centered-cursor-mode clean-aindent-mode code-cells

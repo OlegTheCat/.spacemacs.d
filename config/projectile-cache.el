@@ -31,9 +31,18 @@ Interactively, use plain `M-h p f' for the cached search and
        my/projectile-start-files)
       (car (projectile-project-files root))))
 
+(defun my/projectile--text-buffer-p (buffer)
+  "Return non-nil when BUFFER is a file-visiting textual buffer."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and buffer-file-name
+              (not (derived-mode-p 'special-mode))))))
+
 (defun my/projectile-switch-to-last-buffer-or-file ()
-  "Switch to the project's most recent buffer or open a useful landing file."
-  (let ((buffer (car (projectile-project-buffers-non-visible))))
+  "Switch to the project's most recent text buffer or useful landing file."
+  (let ((buffer
+         (seq-find #'my/projectile--text-buffer-p
+                   (projectile-project-buffers-non-visible))))
     (if buffer
         (switch-to-buffer buffer nil t)
       (let* ((root (projectile-acquire-root))

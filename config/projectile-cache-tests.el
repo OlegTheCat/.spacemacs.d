@@ -67,16 +67,48 @@
               'magit-status)))
 
 (ert-deftest projectile-cache-switch-project-prefers-existing-buffer ()
-  (let (switched-buffer)
-    (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)
-               (lambda () '(existing-buffer)))
-              ((symbol-function 'switch-to-buffer)
-               (lambda (buffer &rest _)
-                 (setq switched-buffer buffer)))
-              ((symbol-function 'projectile-acquire-root)
-               (lambda () (ert-fail "Should not inspect files"))))
-      (my/projectile-switch-to-last-buffer-or-file))
-    (should (eq switched-buffer 'existing-buffer))))
+  (let ((existing-buffer (generate-new-buffer " *project-existing*"))
+        switched-buffer)
+    (unwind-protect
+        (progn
+          (with-current-buffer existing-buffer
+            (setq buffer-file-name "/tmp/project/existing.el"))
+          (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)
+                     (lambda () (list existing-buffer)))
+                    ((symbol-function 'switch-to-buffer)
+                     (lambda (buffer &rest _)
+                       (setq switched-buffer buffer)))
+                    ((symbol-function 'projectile-acquire-root)
+                     (lambda () (ert-fail "Should not inspect files"))))
+            (my/projectile-switch-to-last-buffer-or-file))
+          (should (eq switched-buffer existing-buffer)))
+      (kill-buffer existing-buffer))))
+
+(ert-deftest projectile-cache-switch-project-skips-non-text-buffers ()
+  (let ((agent-buffer (generate-new-buffer " *project-agent*"))
+        (special-buffer (generate-new-buffer " *project-special*"))
+        (text-buffer (generate-new-buffer " *project-text*"))
+        switched-buffer)
+    (unwind-protect
+        (progn
+          (with-current-buffer special-buffer
+            (setq buffer-file-name "/tmp/project/image.png")
+            (special-mode))
+          (with-current-buffer text-buffer
+            (setq buffer-file-name "/tmp/project/notes.md"))
+          (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)
+                     (lambda ()
+                       (list agent-buffer special-buffer text-buffer)))
+                    ((symbol-function 'switch-to-buffer)
+                     (lambda (buffer &rest _)
+                       (setq switched-buffer buffer)))
+                    ((symbol-function 'projectile-acquire-root)
+                     (lambda () (ert-fail "Should not inspect files"))))
+            (my/projectile-switch-to-last-buffer-or-file))
+          (should (eq switched-buffer text-buffer)))
+      (kill-buffer agent-buffer)
+      (kill-buffer special-buffer)
+      (kill-buffer text-buffer))))
 
 (ert-deftest projectile-cache-switch-project-prefers-root-documents-in-order ()
   (dolist (case '((("README.md" "AGENTS.md" "CLAUDE.md") "README.md")

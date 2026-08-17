@@ -88,14 +88,7 @@ This function should only modify configuration layer settings."
                                       (flash
                                        :location
                                        (recipe :fetcher github
-                                               :repo "Prgebish/flash"))
-                                      (ghostel
-                                       :location
-                                       (recipe :fetcher github
-                                               :repo "dakra/ghostel"
-                                               :files (:defaults "etc" "src" "vendor"
-                                                                 "build.zig" "build.zig.zon"
-                                                                 "symbols.map"))))
+                                               :repo "Prgebish/flash")))
 
    ;; A list of packages that cannot be updated.
    dotspacemacs-frozen-packages '()

@@ -75,8 +75,7 @@ This function should only modify configuration layer settings."
    ;; `dotspacemacs/user-config'. To use a local version of a package, use the
    ;; `:location' property: '(your-package :location "~/path/to/your-package/")
    ;; Also include the dependencies as they will not be resolved automatically.
-   dotspacemacs-additional-packages '(pr-review
-                                      persistent-scratch
+   dotspacemacs-additional-packages '(persistent-scratch
                                       highlight-symbol
                                       reverse-im
                                       vdiff
@@ -600,8 +599,7 @@ before packages are loaded."
                  "quick-diff"
                  "ghostel"
                  "ghostel-terminals"
-                 "ghostel-agents"
-                 "pr-review"))
+                 "ghostel-agents"))
       (load (expand-file-name f config-dir)))))
 
 

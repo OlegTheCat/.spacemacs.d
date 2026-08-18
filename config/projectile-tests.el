@@ -1,13 +1,13 @@
-;;; projectile-cache-tests.el --- Tests for Projectile cache config -*- lexical-binding: t -*-
+;;; projectile-tests.el --- Tests for local Projectile config -*- lexical-binding: t -*-
 
 (require 'ert)
 (require 'cl-lib)
 
-(ert-deftest projectile-cache-settings-use-one-hour-transient-cache ()
+(ert-deftest projectile-config-settings-use-one-hour-transient-cache ()
   (should (eq projectile-enable-caching t))
   (should (= projectile-files-cache-expire 3600)))
 
-(ert-deftest projectile-cache-find-file-without-prefix-keeps-cache ()
+(ert-deftest projectile-config-find-file-without-prefix-keeps-cache ()
   (let (events seen-prefix)
     (cl-letf (((symbol-function 'projectile-invalidate-cache)
                (lambda (&rest _) (push 'invalidate events)))
@@ -21,7 +21,7 @@
     (should (equal (nreverse events) '(search)))
     (should-not seen-prefix)))
 
-(ert-deftest projectile-cache-find-file-with-prefix-invalidates-first ()
+(ert-deftest projectile-config-find-file-with-prefix-invalidates-first ()
   (let (events seen-prefix)
     (cl-letf (((symbol-function 'projectile-invalidate-cache)
                (lambda (prompt)
@@ -36,16 +36,18 @@
     (should (equal (nreverse events) '((invalidate nil) search)))
     (should-not seen-prefix)))
 
-(ert-deftest projectile-cache-binds-project-shortcuts ()
-  (let (leader-binding super-bindings)
+(ert-deftest projectile-config-binds-project-shortcuts ()
+  (let (leader-bindings super-bindings)
     (cl-letf (((symbol-function 'spacemacs/set-leader-keys)
                (lambda (key command)
-                 (setq leader-binding (list key command))))
+                 (push (list key command) leader-bindings)))
               ((symbol-function 'global-set-key)
                (lambda (key command)
                  (push (list key command) super-bindings))))
-      (my/projectile-cache-bind-keys))
-    (should (equal leader-binding '("pf" my/helm-projectile-find-file)))
+      (my/projectile-bind-keys))
+    (should (equal (nreverse leader-bindings)
+                   '(("pf" my/helm-projectile-find-file)
+                     ("fyy" my/copy-file-path))))
     (should (equal (nreverse super-bindings)
                    (list (list (kbd "s-p")
                                'helm-projectile-switch-project)
@@ -56,7 +58,44 @@
                          (list (kbd "s-g")
                                'magit-status))))))
 
-(ert-deftest projectile-cache-installs-global-bindings-on-module-load ()
+(ert-deftest projectile-config-copy-file-path-relative-to-project ()
+  (let (copied shown)
+    (cl-letf (((symbol-function 'spacemacs--file-path)
+               (lambda () "/tmp/project/src/example.el"))
+              ((symbol-function 'projectile-project-root)
+               (lambda (directory)
+                 (should (equal directory "/tmp/project/src/"))
+                 "/tmp/project/"))
+              ((symbol-function 'kill-new) (lambda (text) (setq copied text)))
+              ((symbol-function 'message) (lambda (format &rest args)
+                                            (setq shown (apply #'format format args)))))
+      (my/copy-file-path nil))
+    (should (equal copied "src/example.el"))
+    (should (equal shown copied))))
+
+(ert-deftest projectile-config-copy-file-path-prefix-keeps-full-path ()
+  (let (copied)
+    (cl-letf (((symbol-function 'spacemacs--file-path)
+               (lambda () "/tmp/project/src/example.el"))
+              ((symbol-function 'projectile-project-root)
+               (lambda (&rest _)
+                 (ert-fail "A prefix should skip project lookup")))
+              ((symbol-function 'kill-new) (lambda (text) (setq copied text)))
+              ((symbol-function 'message) #'ignore))
+      (my/copy-file-path '(4)))
+    (should (equal copied "/tmp/project/src/example.el"))))
+
+(ert-deftest projectile-config-copy-file-path-outside-project-keeps-full-path ()
+  (let (copied)
+    (cl-letf (((symbol-function 'spacemacs--file-path)
+               (lambda () "/tmp/notes/example.txt"))
+              ((symbol-function 'projectile-project-root) (lambda (&rest _) nil))
+              ((symbol-function 'kill-new) (lambda (text) (setq copied text)))
+              ((symbol-function 'message) #'ignore))
+      (my/copy-file-path nil))
+    (should (equal copied "/tmp/notes/example.txt"))))
+
+(ert-deftest projectile-config-installs-global-bindings-on-module-load ()
   (should (eq (global-key-binding (kbd "s-p"))
               'helm-projectile-switch-project))
   (should (eq (global-key-binding (kbd "s-f"))
@@ -66,7 +105,7 @@
   (should (eq (global-key-binding (kbd "s-g"))
               'magit-status)))
 
-(ert-deftest projectile-cache-switch-project-prefers-existing-buffer ()
+(ert-deftest projectile-config-switch-project-prefers-existing-buffer ()
   (let ((existing-buffer (generate-new-buffer " *project-existing*"))
         switched-buffer)
     (unwind-protect
@@ -84,7 +123,7 @@
           (should (eq switched-buffer existing-buffer)))
       (kill-buffer existing-buffer))))
 
-(ert-deftest projectile-cache-switch-project-skips-non-text-buffers ()
+(ert-deftest projectile-config-switch-project-skips-non-text-buffers ()
   (let ((agent-buffer (generate-new-buffer " *project-agent*"))
         (special-buffer (generate-new-buffer " *project-special*"))
         (text-buffer (generate-new-buffer " *project-text*"))
@@ -110,7 +149,7 @@
       (kill-buffer special-buffer)
       (kill-buffer text-buffer))))
 
-(ert-deftest projectile-cache-switch-project-prefers-root-documents-in-order ()
+(ert-deftest projectile-config-switch-project-prefers-root-documents-in-order ()
   (dolist (case '((("README.md" "AGENTS.md" "CLAUDE.md") "README.md")
                   (("AGENTS.md" "CLAUDE.md") "AGENTS.md")
                   (("CLAUDE.md") "CLAUDE.md")))
@@ -133,7 +172,7 @@
       (should (equal opened-file
                      (expand-file-name expected "/tmp/project/"))))))
 
-(ert-deftest projectile-cache-switch-project-uses-first-indexed-file ()
+(ert-deftest projectile-config-switch-project-uses-first-indexed-file ()
   (let (opened-file)
     (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)
                (lambda () nil))
@@ -149,7 +188,7 @@
       (my/projectile-switch-to-last-buffer-or-file))
     (should (equal opened-file "/tmp/project/src/first.el"))))
 
-(ert-deftest projectile-cache-switch-project-errors-when-project-has-no-files ()
+(ert-deftest projectile-config-switch-project-errors-when-project-has-no-files ()
   (cl-letf (((symbol-function 'projectile-project-buffers-non-visible)
              (lambda () nil))
             ((symbol-function 'projectile-acquire-root)
@@ -159,8 +198,8 @@
     (should-error (my/projectile-switch-to-last-buffer-or-file)
                   :type 'user-error)))
 
-(ert-deftest projectile-cache-installs-project-switch-action ()
+(ert-deftest projectile-config-installs-project-switch-action ()
   (should (eq projectile-switch-project-action
               'my/projectile-switch-to-last-buffer-or-file)))
 
-;;; projectile-cache-tests.el ends here
+;;; projectile-tests.el ends here

@@ -1,4 +1,4 @@
-;;; projectile-cache.el --- Cached Projectile file search -*- lexical-binding: t -*-
+;;; projectile.el --- Local Projectile behavior and shortcuts -*- lexical-binding: t -*-
 
 (require 'seq)
 
@@ -18,6 +18,27 @@ Interactively, use plain `M-h p f' for the cached search and
   ;; REFRESH belongs to this wrapper; do not leak it into Helm Projectile.
   (let ((current-prefix-arg nil))
     (call-interactively #'helm-projectile-find-file)))
+
+(defun my/copy-file-path (&optional absolute)
+  "Copy the current file's project-relative path.
+
+With prefix argument ABSOLUTE, copy the full path instead.  In Dired, use the
+file at point, matching `spacemacs/copy-file-path'.  When the file is not in a
+Projectile project, fall back to its full path."
+  (interactive "P")
+  (if-let* ((file-path (or (spacemacs--file-path)
+                           (and (derived-mode-p 'dired-mode)
+                                (dired-get-filename nil t)))))
+      (let* ((root (unless absolute
+                     (ignore-errors
+                       (projectile-project-root
+                        (file-name-directory file-path)))))
+             (copied-path (if root
+                              (file-relative-name file-path root)
+                            file-path)))
+        (kill-new copied-path)
+        (message "%s" copied-path))
+    (user-error "Current buffer is not visiting a file")))
 
 (defconst my/projectile-start-files
   '("README.md" "AGENTS.md" "CLAUDE.md")
@@ -55,17 +76,18 @@ Interactively, use plain `M-h p f' for the cached search and
 (setq projectile-switch-project-action
       #'my/projectile-switch-to-last-buffer-or-file)
 
-(defun my/projectile-cache-bind-keys ()
+(defun my/projectile-bind-keys ()
   "Install custom Projectile bindings."
   (when (fboundp 'spacemacs/set-leader-keys)
-    (spacemacs/set-leader-keys "pf" #'my/helm-projectile-find-file))
+    (spacemacs/set-leader-keys "pf" #'my/helm-projectile-find-file)
+    (spacemacs/set-leader-keys "fyy" #'my/copy-file-path))
   (global-set-key (kbd "s-p") #'helm-projectile-switch-project)
   (global-set-key (kbd "s-f") #'my/helm-projectile-find-file)
   (global-set-key (kbd "s-s") #'spacemacs/helm-project-smart-do-search)
   (global-set-key (kbd "s-g") #'magit-status))
 
-(my/projectile-cache-bind-keys)
+(my/projectile-bind-keys)
 
-(provide 'projectile-cache-config)
+(provide 'projectile-config)
 
-;;; projectile-cache.el ends here
+;;; projectile.el ends here

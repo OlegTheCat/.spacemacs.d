@@ -424,7 +424,14 @@ rejoined.  A bare quote bar counts as a blank paragraph break."
        ((or (null current)
             (string-match-p ghostel-agent--fresh-line-re line))
         (when current (push current out))
-        (setq current (string-trim-right (ghostel-agent--strip-quote line))))
+        (let ((line (ghostel-agent--strip-quote line)))
+          ;; Codex hangs later prose paragraphs under its response bullet.
+          ;; At a paragraph boundary that indent is presentation, whereas
+          ;; indentation on a list item can still carry nesting information.
+          (setq current
+                (if (string-match-p ghostel-agent--fresh-line-re line)
+                    (string-trim-right line)
+                  (string-trim line)))))
        (t
         (setq current (concat current " "
                               (string-trim (ghostel-agent--strip-quote line)))))))
@@ -432,12 +439,18 @@ rejoined.  A bare quote bar counts as a blank paragraph break."
     (nreverse out)))
 
 (defun ghostel-agent--clean-text (text &optional no-join)
-  "Return TEXT cleaned of Claude console formatting.
-Strips the `⏺'/`●' response marker, the common indentation, and quote-bar
-prefixes (ASCII `| ' and block bars like `▎').  Unless NO-JOIN, folds
-wrapped lines within each paragraph (blank lines and list items stay
-separate)."
-  (let* ((text (replace-regexp-in-string "[⏺●]" " " text))
+  "Return TEXT cleaned of Claude/Codex console formatting.
+Strips a leading `⏺'/`●'/`•' response marker, the common indentation,
+and quote-bar prefixes (ASCII `| ' and block bars like `▎').  Unless
+NO-JOIN, folds wrapped lines within each paragraph (blank lines and list items
+stay separate)."
+  ;; Replace the marker field with Codex/Claude's two-column hanging indent so
+  ;; `ghostel-agent--dedent' can remove that same offset from every line.
+  (let* ((text (replace-regexp-in-string
+                "\\`[ \t\n]*[⏺●•][ \t]+" "  " text))
+         ;; Keep the older cleanup for rendered Claude markers inside a
+         ;; selection, but do not erase real Codex `•' list items later on.
+         (text (replace-regexp-in-string "[⏺●]" " " text))
          (lines (ghostel-agent--dedent (split-string text "\n")))
          (lines (if no-join
                     (mapcar #'ghostel-agent--strip-quote lines)
@@ -445,9 +458,9 @@ separate)."
     (string-trim (string-join lines "\n"))))
 
 (defun ghostel-agent-copy-clean (beg end &optional no-join)
-  "Copy region BEG..END to the kill ring, cleaned of Claude console formatting.
-Strips the `⏺' marker, the common indentation and `| ' quote prefixes,
-and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
+  "Copy region BEG..END to the kill ring, cleaned of agent console formatting.
+Strips the leading response marker, presentation indentation and `| ' quote
+prefixes, and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
 \(`C-u'), keep the original line breaks — use this for code blocks."
   (interactive "r\nP")
   (let ((clean (ghostel-agent--clean-text

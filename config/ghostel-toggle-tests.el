@@ -1485,6 +1485,38 @@ s-t parses prefixes)."
   (should (equal (ghostel-agent--clean-text "▎ para one\n▎\n▎ para two")
                  "para one\n\npara two")))
 
+(ert-deftest gta-clean-text-codex-response-marker-and-paragraph-indent ()
+  "Codex's response bullet and hanging paragraph indent are presentation only."
+  (should
+   (equal
+    (ghostel-agent--clean-text
+     (concat "• i think the fanout -> corrector flow could be simpler.\n\n"
+             "  right now fanout skips paragraphs already at their sub-target.\n\n"
+             "  could we keep a dense results array throughout?\n\n"
+             "  wdyt?"))
+    (concat "i think the fanout -> corrector flow could be simpler.\n\n"
+            "right now fanout skips paragraphs already at their sub-target.\n\n"
+            "could we keep a dense results array throughout?\n\n"
+            "wdyt?"))))
+
+(ert-deftest gta-clean-text-codex-paragraph-indent-without-marker ()
+  "A selection that starts after Codex's bullet still loses its hanging indent."
+  (should
+   (equal
+    (ghostel-agent--clean-text
+     (concat "i think the fanout -> corrector flow could be simpler.\n\n"
+             "  right now fanout skips paragraphs already at their sub-target.\n\n"
+             "  wdyt?"))
+    (concat "i think the fanout -> corrector flow could be simpler.\n\n"
+            "right now fanout skips paragraphs already at their sub-target.\n\n"
+            "wdyt?"))))
+
+(ert-deftest gta-clean-text-codex-keeps-later-real-bullets ()
+  "Only Codex's leading response bullet is decoration."
+  (should (equal (ghostel-agent--clean-text
+                  "• Summary:\n\n  • first item wraps\n  onto another line")
+                 "Summary:\n\n• first item wraps onto another line")))
+
 ;;; --- quote-region (s-') -----------------------------------------------------------
 
 (ert-deftest gta-quote-region-cleans-and-quotes ()

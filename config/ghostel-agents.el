@@ -454,8 +454,6 @@ and folds wrapped lines within each paragraph.  With prefix arg NO-JOIN
                 (buffer-substring-no-properties beg end) no-join)))
     (kill-new clean)
     (deactivate-mark)
-    (when (fboundp 'ghostel-readonly-exit)
-      (ignore-errors (ghostel-readonly-exit)))
     (message "Copied cleaned text (%d chars)%s"
              (length clean) (if no-join " [no join]" ""))))
 

@@ -46,7 +46,6 @@ deterministically via `default-directory'."
          (ghostel-toggle--session-counter 0)
          (ghostel-toggle--fullscreen-views nil)
          (ghostel-toggle--last-window-alist nil)
-         (ghostel-agent--last-session-alist nil)
          (gt--test-buffers nil)
          (gt--last-paste nil)
          (window-min-width 2)
@@ -1001,21 +1000,6 @@ sees no shown view in a split and falls to the bring-on-top branch)."
       (should (equal (plist-get s2 :label) "Claude 2"))
       (should (equal (plist-get c1 :label) "Codex")))))
 
-(ert-deftest gta-last-session-is-per-agent ()
-  "`C-2 s-l' returns to the codex you last used, independent of the
-project-wide selection set by a later claude/codex pick."
-  (gt-with-env
-    (let* ((root "/tmp/projA/")
-           (c1 (gta--register 'claude root))
-           (_c2 (gta--register 'claude root))
-           (x1 (gta--register 'codex  root)))
-      (ghostel-toggle--select-session c1)   ; claude's last → c1
-      (ghostel-toggle--select-session x1)   ; codex's last → x1 (and project selection)
-      (should (equal (gt--id (ghostel-agent--last-session-for-agent 'claude root))
-                     (gt--id c1)))
-      (should (equal (gt--id (ghostel-agent--last-session-for-agent 'codex root))
-                     (gt--id x1))))))
-
 (ert-deftest gta-cleanup-on-kill-prunes-everything ()
   (gt-with-env
     (let* ((root "/tmp/projA/")
@@ -1024,8 +1008,7 @@ project-wide selection set by a later claude/codex pick."
       (ghostel-toggle--select-session s2)
       (kill-buffer (plist-get s2 :buffer))
       (should (= (length (ghostel-toggle--sessions-for-root 'agent root)) 1))
-      (should (null (ghostel-toggle--selected-session 'agent root)))
-      (should (null (ghostel-agent--last-session-for-agent 'codex root))))))
+      (should (null (ghostel-toggle--selected-session 'agent root))))))
 
 ;;; --- A. fullscreen / split geometry -------------------------------------------
 
@@ -1104,25 +1087,24 @@ sticky-hidden), so C-s-l re-fires it afterwards."
       (ghostel-agent-home-toggle nil)               ; C-s-l re-fires it
       (should (gt--fullscreen-now-p homebuf)))))
 
-(ert-deftest gta-win-home-toggle-reuses-dismissed-prefixed-agent ()
-  "C-2 C-s-l -> s-l -> C-s-l re-fires the existing home Codex session.
-The unprefixed home toggle must not create and show a new Claude session."
+(ert-deftest gta-win-home-toggle-prefixes-reuse-selected-session ()
+  "Every C-s-l prefix re-fires the selected home session after dismissal."
   (gt-with-env
     (let* ((home (ghostel-toggle--normalize-root "~/"))
            (proj "/tmp/projA/"))
       (gt--show-code proj)
       (ghostel-agent-home-toggle 2)                 ; C-2 C-s-l -> Codex
-      (let* ((codex (ghostel-agent--last-session-for-agent 'codex home))
+      (let* ((codex (ghostel-toggle--default-session 'agent home))
              (codexbuf (plist-get codex :buffer)))
         (should (eq (plist-get (ghostel-toggle--current-session 'agent) :agent)
                     'codex))
         (should (gt--fullscreen-now-p codexbuf))
-        (ghostel-agent-toggle-command nil)          ; s-l -> dismiss
-        (should-not (get-buffer-window codexbuf))
-        (ghostel-agent-home-toggle nil)             ; C-s-l -> same Codex
-        (should (eq (plist-get (ghostel-toggle--current-session 'agent) :agent)
-                    'codex))
-        (should (gt--fullscreen-now-p codexbuf))
+        (dolist (arg '(nil (4) 2 3))
+          (ghostel-agent-toggle-command nil)        ; s-l -> dismiss
+          (should-not (get-buffer-window codexbuf))
+          (ghostel-agent-home-toggle arg)
+          (should (eq (current-buffer) codexbuf))
+          (should (gt--fullscreen-now-p codexbuf)))
         (should (= (length (ghostel-toggle--sessions-for-root 'agent home))
                    1))))))
 
@@ -1436,16 +1418,21 @@ s-t parses prefixes)."
         (should (equal (plist-get session :root)
                        (ghostel-toggle--normalize-root root)))))))
 
-(ert-deftest gta-win-c2-s-l-returns-to-last-codex ()
+(ert-deftest gta-win-s-l-prefixes-return-to-selected-session ()
   (gt-with-env
     (let* ((root "/tmp/projA/")
-           (c1 (gta--register 'claude root))
-           (x1 (gta--register 'codex root)))
-      (ghostel-toggle--select-session x1)           ; codex's last → x1
-      (ghostel-toggle--select-session c1)           ; project selection → claude
-      (gt--show-code root)
-      (ghostel-agent-toggle-command 2)              ; C-2 s-l
-      (should (eq (current-buffer) (plist-get x1 :buffer))))))
+           (_codex (gta--register 'codex root))
+           (claude1 (gta--register 'claude root))
+           (_claude2 (gta--register 'claude root))
+           (buf (plist-get claude1 :buffer))
+           (code (gt--show-code root)))
+      (ghostel-toggle--select-session claude1)
+      (dolist (arg '(nil (4) 2 3))
+        (switch-to-buffer code)
+        (ghostel-agent-toggle-command arg)
+        (should (eq (current-buffer) buf))
+        (ghostel-agent-toggle-command arg)
+        (should-not (get-buffer-window buf))))))
 
 ;;; --- F. text cleaning (pure) -----------------------------------------------------
 

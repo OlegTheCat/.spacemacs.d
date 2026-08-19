@@ -2,6 +2,8 @@
 
 (require 'seq)
 
+(defvar projectile-known-projects nil)
+
 ;; Keep project file lists for one hour.  The cache is transient, so it is
 ;; rebuilt after restarting Emacs even if the hour has not elapsed.
 (setq projectile-enable-caching t
@@ -75,6 +77,26 @@ Projectile project, fall back to its full path."
 
 (setq projectile-switch-project-action
       #'my/projectile-switch-to-last-buffer-or-file)
+
+(defun my/projectile-promote-selected-project (project &rest _)
+  "Move successfully selected PROJECT to the front of the known-project list."
+  (let* ((project (file-name-as-directory (abbreviate-file-name project)))
+         (projects (projectile-known-projects)))
+    (when (and (member project projects)
+               (not (equal project (car projects))))
+      (setq projectile-known-projects
+            (cons project (delete project (copy-sequence projects))))
+      (projectile-merge-known-projects))))
+
+(defun my/projectile-install-mru-tracking ()
+  "Record successful Projectile selections as most recently used."
+  (unless (advice-member-p #'my/projectile-promote-selected-project
+                           #'projectile-switch-project-by-name)
+    (advice-add #'projectile-switch-project-by-name :after
+                #'my/projectile-promote-selected-project)))
+
+(with-eval-after-load 'projectile
+  (my/projectile-install-mru-tracking))
 
 (defun my/projectile-bind-keys ()
   "Install custom Projectile bindings."

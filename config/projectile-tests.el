@@ -202,4 +202,37 @@
   (should (eq projectile-switch-project-action
               'my/projectile-switch-to-last-buffer-or-file)))
 
+(ert-deftest projectile-config-promotes-selected-project-to-front ()
+  (let ((merge-count 0))
+    (cl-letf (((symbol-value 'projectile-known-projects)
+               '("/tmp/first/" "/tmp/selected/" "/tmp/last/"))
+              ((symbol-function 'projectile-known-projects)
+               (lambda () (symbol-value 'projectile-known-projects)))
+              ((symbol-function 'projectile-merge-known-projects)
+               (lambda () (cl-incf merge-count))))
+      (my/projectile-promote-selected-project "/tmp/selected")
+      (should (equal (symbol-value 'projectile-known-projects)
+                     '("/tmp/selected/" "/tmp/first/" "/tmp/last/"))))
+    (should (= merge-count 1))))
+
+(ert-deftest projectile-config-mru-promotion-skips-no-ops ()
+  (let ((merge-count 0))
+    (cl-letf (((symbol-value 'projectile-known-projects)
+               '("/tmp/first/" "/tmp/last/"))
+              ((symbol-function 'projectile-known-projects)
+               (lambda () (symbol-value 'projectile-known-projects)))
+              ((symbol-function 'projectile-merge-known-projects)
+               (lambda () (cl-incf merge-count))))
+      (my/projectile-promote-selected-project "/tmp/first/")
+      (my/projectile-promote-selected-project "/tmp/unknown/")
+      (should (equal (symbol-value 'projectile-known-projects)
+                     '("/tmp/first/" "/tmp/last/"))))
+    (should (= merge-count 0))))
+
+(ert-deftest projectile-config-installs-mru-advice-once ()
+  (my/projectile-install-mru-tracking)
+  (my/projectile-install-mru-tracking)
+  (should (advice-member-p #'my/projectile-promote-selected-project
+                           #'projectile-switch-project-by-name)))
+
 ;;; projectile-tests.el ends here

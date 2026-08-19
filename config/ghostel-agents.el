@@ -337,6 +337,10 @@ plain `s-l' (it is registered `:dismiss', so `s-l' dismisses it and
   "Line that starts a fresh logical line and must not be folded onto the
 previous one: a list item (`- ', `* ', `1. ', `2) ') or a `| ' quote line.")
 
+(defconst ghostel-agent--list-line-re
+  "\\`\\([ \t]*\\)\\(?:[-*•]\\|[0-9]+[.)]\\)\\(?:[ \t]\\|\\'\\)"
+  "List-item line, with its leading indentation in match group 1.")
+
 (defun ghostel-agent--dedent (lines)
   "Strip the leading whitespace shared by every non-blank line in LINES."
   (let* ((indents (delq nil
@@ -355,6 +359,25 @@ renders on each wrapped line of a blockquote."
   (if (string-match "\\`\\([ \t]*\\)[|▏▎▍▌][ \t]?" line)
       (concat (match-string 1 line) (substring line (match-end 0)))
     line))
+
+(defun ghostel-agent--dedent-list-items (lines)
+  "Remove the minimum indentation shared by list items in LINES.
+Relative indentation is preserved, so nested items remain nested."
+  (let* ((indents
+          (delq nil
+                (mapcar (lambda (line)
+                          (and (string-match ghostel-agent--list-line-re line)
+                               (match-end 1)))
+                        lines)))
+         (common (if indents (apply #'min indents) 0)))
+    (if (zerop common)
+        lines
+      (mapcar
+       (lambda (line)
+         (if (string-match ghostel-agent--list-line-re line)
+             (substring line common)
+           line))
+       lines))))
 
 (defun ghostel-agent--fold-lines (lines)
   "Fold wrapped continuation LINES into one line per paragraph.
@@ -400,7 +423,8 @@ stay separate)."
          (lines (ghostel-agent--dedent (split-string text "\n")))
          (lines (if no-join
                     (mapcar #'ghostel-agent--strip-quote lines)
-                  (ghostel-agent--fold-lines lines))))
+                  (ghostel-agent--fold-lines
+                   (ghostel-agent--dedent-list-items lines)))))
     (string-trim (string-join lines "\n"))))
 
 (defun ghostel-agent-copy-clean (beg end &optional no-join)

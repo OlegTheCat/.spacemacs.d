@@ -1512,6 +1512,22 @@ erroring on a sole window."
                   "• Summary:\n\n  • first item wraps\n  onto another line")
                  "Summary:\n\n• first item wraps onto another line")))
 
+(ert-deftest gta-clean-text-removes-shared-numbered-list-indent ()
+  "A top-level list loses console indent without flattening nested items."
+  (should
+   (equal
+    (ghostel-agent--clean-text
+     (concat "> !785 → !793 → !794\n\n"
+             "okay, merge them in order:\n"
+             "  1. rebase the MR\n"
+             "    1. keep this nested\n"
+             "  2. wait for CI"))
+    (concat "> !785 → !793 → !794\n\n"
+            "okay, merge them in order:\n"
+            "1. rebase the MR\n"
+            "  1. keep this nested\n"
+            "2. wait for CI"))))
+
 ;;; --- quote-region (s-') -----------------------------------------------------------
 
 (ert-deftest gta-quote-region-cleans-and-quotes ()

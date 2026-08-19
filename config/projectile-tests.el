@@ -235,4 +235,26 @@
   (should (advice-member-p #'my/projectile-promote-selected-project
                            #'projectile-switch-project-by-name)))
 
+(ert-deftest projectile-config-switch-candidates-use-project-buffer ()
+  (let ((project-buffer (generate-new-buffer " *project-candidates-origin*"))
+        seen-buffer)
+    (unwind-protect
+        (let ((helm-current-buffer project-buffer))
+          (cl-letf (((symbol-function 'projectile-relevant-known-projects)
+                     (lambda ()
+                       (setq seen-buffer (current-buffer))
+                       '("/tmp/recent/" "/tmp/older/"))))
+            (with-temp-buffer
+              (should
+               (equal (my/helm-projectile-switch-project-candidates)
+                      '("/tmp/recent/" "/tmp/older/")))))
+          (should (eq seen-buffer project-buffer)))
+      (kill-buffer project-buffer))))
+
+(ert-deftest projectile-config-installs-relevant-helm-candidates ()
+  (let ((helm-source-projectile-projects '((candidates . ignore))))
+    (my/helm-projectile-install-relevant-project-candidates)
+    (should (eq (alist-get 'candidates helm-source-projectile-projects)
+                #'my/helm-projectile-switch-project-candidates))))
+
 ;;; projectile-tests.el ends here

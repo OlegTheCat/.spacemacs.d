@@ -2,6 +2,8 @@
 
 (require 'seq)
 
+(defvar helm-current-buffer nil)
+(defvar helm-source-projectile-projects nil)
 (defvar projectile-known-projects nil)
 
 ;; Keep project file lists for one hour.  The cache is transient, so it is
@@ -97,6 +99,22 @@ Projectile project, fall back to its full path."
 
 (with-eval-after-load 'projectile
   (my/projectile-install-mru-tracking))
+
+(defun my/helm-projectile-switch-project-candidates ()
+  "Return MRU project candidates, excluding the current project."
+  (with-current-buffer (or (and (buffer-live-p helm-current-buffer)
+                                helm-current-buffer)
+                           (current-buffer))
+    (mapcar #'copy-sequence (projectile-relevant-known-projects))))
+
+(defun my/helm-projectile-install-relevant-project-candidates ()
+  "Make Helm honor Projectile's current-project filtering."
+  (when helm-source-projectile-projects
+    (setcdr (assq 'candidates helm-source-projectile-projects)
+            #'my/helm-projectile-switch-project-candidates)))
+
+(with-eval-after-load 'helm-projectile
+  (my/helm-projectile-install-relevant-project-candidates))
 
 (defun my/projectile-bind-keys ()
   "Install custom Projectile bindings."

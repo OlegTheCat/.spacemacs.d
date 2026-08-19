@@ -75,10 +75,11 @@ Setting `major-mode' is enough for `derived-mode-p' — no process needed."
 
 (defun gta--register (agent root)
   "Register a fake AGENT session in ROOT through the real code path."
-  (ghostel-toggle--register-session
-   'agent root (gt--fake-buffer)
-   :label (ghostel-agent--next-label agent root)
-   :extra (list :agent agent :resume nil)))
+  (let ((label (capitalize (symbol-name agent))))
+    (ghostel-toggle--register-session
+     'agent root (gt--fake-buffer)
+     :label (ghostel-agent--next-label label root)
+     :extra (list :agent-label label :command (symbol-name agent)))))
 
 (defun gtt--register (root)
   "Register a fake terminal session in ROOT through the real code path."
@@ -974,23 +975,28 @@ sees no shown view in a split and falls to the bring-on-top branch)."
 
 ;;; --- pure helpers ------------------------------------------------------------
 
-(ert-deftest gta-parse-prefix ()
-  (should (equal (ghostel-agent--parse-prefix nil)   '(nil nil)))
-  (should (equal (ghostel-agent--parse-prefix '(4))  '(claude t)))
-  (should (equal (ghostel-agent--parse-prefix 2)     '(codex nil)))
-  (should (equal (ghostel-agent--parse-prefix 3)     '(codex t)))
-  (should-error (ghostel-agent--parse-prefix 99)))
+(ert-deftest gta-prefix-commands-are-configurable ()
+  (let ((ghostel-agent-default-command "pi")
+        (ghostel-agent-c-u-command "pi --resume")
+        (ghostel-agent-c-2-command "opencode")
+        (ghostel-agent-c-3-command "opencode --continue"))
+    (should (equal (ghostel-agent--command-for-prefix nil) "pi"))
+    (should (equal (ghostel-agent--command-for-prefix '(4)) "pi --resume"))
+    (should (equal (ghostel-agent--command-for-prefix 2) "opencode"))
+    (should (equal (ghostel-agent--command-for-prefix 3)
+                   "opencode --continue"))
+    (should-error (ghostel-agent--command-for-prefix 99))))
 
-(ert-deftest gta-command-line ()
-  (let ((claude (ghostel-agent--profile 'claude))
-        (codex  (ghostel-agent--profile 'codex)))
-    (should (equal (ghostel-agent--command-line claude nil) "claude"))
-    (should (equal (ghostel-agent--command-line claude t)   "claude --resume"))
-    (should (equal (ghostel-agent--command-line codex  t)   "codex resume"))))
+(ert-deftest gta-command-program ()
+  (should (equal (ghostel-agent--command-program "codex resume") "codex"))
+  (should (equal (ghostel-agent--command-program "'/tmp/My Agent/pi' --flag")
+                 "/tmp/My Agent/pi"))
+  (should-error (ghostel-agent--command-program ""))
+  (should-error (ghostel-agent--command-program nil)))
 
 ;;; --- session registry & labels ------------------------------------------------
 
-(ert-deftest gta-labels-increment-per-agent ()
+(ert-deftest gta-labels-increment-per-command-name ()
   (gt-with-env
     (let* ((root "/tmp/projA/")
            (s1 (gta--register 'claude root))
@@ -1091,20 +1097,21 @@ sticky-hidden), so C-s-l re-fires it afterwards."
   "Every C-s-l prefix re-fires the selected home session after dismissal."
   (gt-with-env
     (let* ((home (ghostel-toggle--normalize-root "~/"))
-           (proj "/tmp/projA/"))
+           (proj "/tmp/projA/")
+           (ghostel-agent-c-2-command "opencode --home"))
       (gt--show-code proj)
-      (ghostel-agent-home-toggle 2)                 ; C-2 C-s-l -> Codex
-      (let* ((codex (ghostel-toggle--default-session 'agent home))
-             (codexbuf (plist-get codex :buffer)))
-        (should (eq (plist-get (ghostel-toggle--current-session 'agent) :agent)
-                    'codex))
-        (should (gt--fullscreen-now-p codexbuf))
+      (ghostel-agent-home-toggle 2)                 ; C-2 C-s-l -> OpenCode
+      (let* ((home-session (ghostel-toggle--default-session 'agent home))
+             (homebuf (plist-get home-session :buffer)))
+        (should (equal (plist-get home-session :command) "opencode --home"))
+        (should (equal (plist-get home-session :agent-label) "Opencode"))
+        (should (gt--fullscreen-now-p homebuf))
         (dolist (arg '(nil (4) 2 3))
           (ghostel-agent-toggle-command nil)        ; s-l -> dismiss
-          (should-not (get-buffer-window codexbuf))
+          (should-not (get-buffer-window homebuf))
           (ghostel-agent-home-toggle arg)
-          (should (eq (current-buffer) codexbuf))
-          (should (gt--fullscreen-now-p codexbuf)))
+          (should (eq (current-buffer) homebuf))
+          (should (gt--fullscreen-now-p homebuf)))
         (should (= (length (ghostel-toggle--sessions-for-root 'agent home))
                    1))))))
 
@@ -1404,17 +1411,18 @@ erroring on a sole window."
 
 ;;; --- E. prefix dispatch through the real commands --------------------------------
 
-(ert-deftest gta-win-c2-s-t-spawns-codex ()
-  "`C-2 s-t' from a code buffer creates a Codex session (the global agent
-s-t parses prefixes)."
+(ert-deftest gta-win-c2-s-t-spawns-configured-command ()
+  "`C-2 s-t' creates a session from the current configurable command."
   (gt-with-env
-    (let ((root "/tmp/projA/"))
+    (let ((root "/tmp/projA/")
+          (ghostel-agent-c-2-command "opencode --model test"))
       (gt--show-code root)
       (ghostel-agent-new-session-command 2)
       (let ((session (ghostel-toggle--current-session 'agent)))
         (should session)
-        (should (eq (plist-get session :agent) 'codex))
-        (should (equal (plist-get session :label) "Codex"))
+        (should (equal (plist-get session :command) "opencode --model test"))
+        (should (equal (plist-get session :agent-label) "Opencode"))
+        (should (equal (plist-get session :label) "Opencode"))
         (should (equal (plist-get session :root)
                        (ghostel-toggle--normalize-root root)))))))
 

@@ -1,8 +1,9 @@
 ;;; ghostel-agents.el --- Ghostel coding agent sidebar on ghostel-toggle -*- lexical-binding: t -*-
 
-;; The `agent' instantiation of the ghostel-toggle library: Claude/Codex
-;; CLIs in a right sidebar (`s-l'), with tabs (`s-t'), prefix-selected
-;; agents (`C-u'/`C-2'/`C-3'), per-project fullscreen (`s-<return>' while
+;; The `agent' instantiation of the ghostel-toggle library: configurable
+;; coding-agent CLIs in a right sidebar (`s-l'), with tabs (`s-t'),
+;; prefix-selected creation commands (`C-u'/`C-2'/`C-3'), per-project
+;; fullscreen (`s-<return>' while
 ;; focused), a home-directory fullscreen agent (`C-s-l'), region sending,
 ;; and console-output cleanup helpers (`s-c', `s-'').
 
@@ -11,16 +12,17 @@
 (require 'subr-x)
 (require 'ghostel-toggle)
 
-(defvar ghostel-agent-profiles
-  '((claude
-     :program "claude"
-     :args nil
-     :resume-args ("--resume"))
-    (codex
-     :program "codex"
-     :args nil
-     :resume-args ("resume")))
-  "Agent profiles available through ghostel agent commands.")
+(defvar ghostel-agent-default-command "claude"
+  "Complete command used to create an agent without a prefix.")
+
+(defvar ghostel-agent-c-u-command "claude --resume"
+  "Complete command used to create an agent with a `C-u' prefix.")
+
+(defvar ghostel-agent-c-2-command "codex"
+  "Complete command used to create an agent with a `C-2' prefix.")
+
+(defvar ghostel-agent-c-3-command "codex resume"
+  "Complete command used to create an agent with a `C-3' prefix.")
 
 (defvar ghostel-agent-command-delay 0.3
   "Seconds to wait before sending the agent command to a new shell.")
@@ -126,34 +128,34 @@ generated closer.  With prefix argument LITERAL, insert one backtick."
                             :size 0.55
                             :minor-mode 'ghostel-agent-session-mode)
 
-(defun ghostel-agent--profile (agent)
-  "Return the profile plist for AGENT."
-  (or (cdr (assq agent ghostel-agent-profiles))
-      (user-error "Unknown ghostel agent: %S" agent)))
-
-(defun ghostel-agent--sessions-for-agent (agent root)
-  "Return live AGENT sessions for ROOT."
+(defun ghostel-agent--sessions-with-label (label root)
+  "Return live agent sessions with base LABEL in ROOT."
   (seq-filter (lambda (session)
-                (eq agent (plist-get session :agent)))
+                (equal label (plist-get session :agent-label)))
               (ghostel-toggle--sessions-for-root 'agent root)))
 
-(defun ghostel-agent--next-label (agent root)
-  "Return the display label for a new AGENT session in ROOT."
-  (let* ((base (capitalize (symbol-name agent)))
-         (count (1+ (length (ghostel-agent--sessions-for-agent agent root)))))
+(defun ghostel-agent--next-label (base root)
+  "Return the next display label for BASE in ROOT."
+  (let ((count (1+ (length (ghostel-agent--sessions-with-label base root)))))
     (if (= count 1)
         base
       (format "%s %d" base count))))
 
-(defun ghostel-agent--command-line (profile resume)
-  "Return the shell command for PROFILE.
-When RESUME is non-nil, include the profile's resume arguments."
-  (mapconcat #'shell-quote-argument
-             (cons (plist-get profile :program)
-                   (if resume
-                       (plist-get profile :resume-args)
-                     (plist-get profile :args)))
-             " "))
+(defun ghostel-agent--command-for-prefix (arg)
+  "Return the configured creation command for raw prefix ARG."
+  (cond
+   ((null arg) ghostel-agent-default-command)
+   ((equal arg '(4)) ghostel-agent-c-u-command)
+   ((equal arg 2) ghostel-agent-c-2-command)
+   ((equal arg 3) ghostel-agent-c-3-command)
+   (t (user-error "Unknown ghostel agent prefix: %S" arg))))
+
+(defun ghostel-agent--command-program (command)
+  "Return the executable token from complete shell COMMAND."
+  (unless (and (stringp command) (not (string-empty-p command)))
+    (user-error "Ghostel agent command must be a non-empty string"))
+  (or (car (split-string-shell-command command))
+      (user-error "Ghostel agent command must name an executable")))
 
 (defun ghostel-agent--send-command (buf command)
   "Send COMMAND to the shell running in BUF, then press Return.
@@ -170,15 +172,15 @@ executing the command."
       (ghostel-send-string command)
       (ghostel-send-key "return"))))
 
-(defun ghostel-agent--create (agent root &optional resume hidden)
-  "Create a new ghostel terminal running AGENT in ROOT and return its window.
-When RESUME is non-nil, use the agent profile's resume arguments.  When
-HIDDEN is non-nil, create without touching the current window layout."
-  (let* ((profile (ghostel-agent--profile agent))
-         (command (ghostel-agent--command-line profile resume))
-         (args (list :name (symbol-name agent)
-                     :label (ghostel-agent--next-label agent root)
-                     :extra (list :agent agent :resume resume)
+(defun ghostel-agent--create (command root &optional hidden)
+  "Create a new ghostel terminal running COMMAND in ROOT and return its window.
+When HIDDEN is non-nil, create without touching the current window layout."
+  (let* ((program (file-name-nondirectory
+                   (ghostel-agent--command-program command)))
+         (base-label (capitalize program))
+         (args (list :name program
+                     :label (ghostel-agent--next-label base-label root)
+                     :extra (list :agent-label base-label :command command)
                      :setup (lambda (buf)
                               (run-at-time ghostel-agent-command-delay nil
                                            #'ghostel-agent--send-command
@@ -245,19 +247,6 @@ Leave a blank line after the pasted block for continuing the prompt."
      (t
       (user-error "Ghostel agent session is no longer live")))))
 
-(defun ghostel-agent--parse-prefix (arg)
-  "Return (AGENT RESUME) for raw prefix ARG.
-Plain commands target the selected session for this project.
-`C-u' targets Claude, creating with `--resume' when needed.
-`C-2' targets Codex.
-`C-3' targets Codex, creating with `resume' when needed."
-  (cond
-   ((null arg) '(nil nil))
-   ((equal arg '(4)) '(claude t))
-   ((equal arg 2) '(codex nil))
-   ((equal arg 3) '(codex t))
-   (t (user-error "Unknown ghostel agent prefix: %S" arg))))
-
 (defun ghostel-agent--fullscreen-sl (view)
   "Plain `s-l' action for fullscreen VIEW (sticky fullscreen mode).
 On the agent shown full-frame, hide it (collapse to the code).  Otherwise
@@ -280,35 +269,30 @@ hide it (to the code) when shown, or re-expand it to fullscreen when hidden
 or split (sending any active region first).
 Fullscreen mode is sticky until `s-<return>' demotes it (see
 `ghostel-toggle-fullscreen-command').
-When creation is needed, plain `s-l' starts Claude, `C-u s-l' starts
-Claude with `--resume', `C-2 s-l' starts Codex, and `C-3 s-l' starts
-Codex with `resume'."
+When creation is needed, ARG selects one of `ghostel-agent-default-command',
+`ghostel-agent-c-u-command', `ghostel-agent-c-2-command', and
+`ghostel-agent-c-3-command'."
   (interactive "P")
   (let* ((root (ghostel-toggle-command-root))
          (view (ghostel-toggle--view-for-root 'agent root))
-         (parsed (ghostel-agent--parse-prefix arg))
-         (agent (car parsed))
-         (resume (cadr parsed)))
+         (command (ghostel-agent--command-for-prefix arg)))
     (if view
         (ghostel-agent--fullscreen-sl view)
       (let ((session (ghostel-toggle--default-session 'agent root)))
         (if session
             (ghostel-agent-toggle-session session)
           (ghostel-toggle--remember-last-window 'agent)
-          (select-window (ghostel-agent--create (or agent 'claude)
-                                                root resume)))))))
+          (select-window (ghostel-agent--create command root)))))))
 
 (defun ghostel-agent-new-session-command (arg)
   "Create and show a new ghostel agent session based on prefix ARG.
-Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
-`C-2 s-t' creates Codex, and `C-3 s-t' creates Codex resume."
+ARG selects the same four configurable commands as
+`ghostel-agent-toggle-command'."
   (interactive "P")
-  (let* ((parsed (ghostel-agent--parse-prefix arg))
-         (agent (or (car parsed) 'claude))
-         (resume (cadr parsed))
+  (let* ((command (ghostel-agent--command-for-prefix arg))
          (root (ghostel-toggle-command-root)))
     (ghostel-toggle--remember-last-window 'agent)
-    (select-window (ghostel-agent--create agent root resume))))
+    (select-window (ghostel-agent--create command root))))
 
 (defun ghostel-agent-next-session ()
   "Switch to the next ghostel agent session for this project."
@@ -320,34 +304,31 @@ Plain `s-t' creates Claude, `C-u s-t' creates Claude resume,
   (interactive)
   (ghostel-toggle-cycle-session 'agent -1))
 
-(defun ghostel-agent--ensure-buffer (agent root resume)
+(defun ghostel-agent--ensure-buffer (command root)
   "Return the selected live agent buffer in ROOT, creating one if needed.
-AGENT and RESUME only choose the creation command when ROOT has no session."
+COMMAND is used only when ROOT has no session."
   (or (when-let* ((session (ghostel-toggle--default-session 'agent root)))
         (ghostel-toggle--session-buffer session))
       (progn
-        (ghostel-agent--create agent root resume 'hidden)
+        (ghostel-agent--create command root 'hidden)
         (when-let* ((session (ghostel-toggle--default-session 'agent root)))
           (ghostel-toggle--session-buffer session)))))
 
 (defun ghostel-agent-home-toggle (arg)
   "Toggle a fullscreen agent session rooted in the home directory.
 Reuse the selected home agent regardless of prefix.  When no home session
-exists, prefix ARG follows `ghostel-agent-toggle-command' creation
-conventions: plain = Claude, `C-u' = Claude resume, `C-2' = Codex,
-`C-3' = Codex resume.
+exists, prefix ARG selects the same configurable creation command as
+`ghostel-agent-toggle-command'.
 Promotes the home (~/) agent to fullscreen from any project; press again
 to restore the previous layout.  The home fullscreen also dismisses with
 plain `s-l' (it is registered `:dismiss', so `s-l' dismisses it and
-C-s-l re-fires it)."
+  C-s-l re-fires it)."
   (interactive "P")
-  (let* ((parsed (ghostel-agent--parse-prefix arg))
-         (agent (car parsed))
-         (resume (cadr parsed)))
+  (let ((command (ghostel-agent--command-for-prefix arg)))
     (ghostel-toggle-home-toggle
      'agent
      (lambda (root)
-       (ghostel-agent--ensure-buffer (or agent 'claude) root resume)))))
+       (ghostel-agent--ensure-buffer command root)))))
 
 ;;; Console output cleanup (s-c / s-')
 

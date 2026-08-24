@@ -6,6 +6,21 @@
 ;; Windmove
 (windmove-default-keybindings)
 
+;; Follow the macOS light/dark appearance.
+(defun my/sync-theme-with-macos (appearance)
+  "Use the Spacemacs theme matching the macOS APPEARANCE."
+  (let ((theme (pcase appearance
+                 ('dark 'spacemacs-dark)
+                 ('light 'spacemacs-light))))
+    (when (and theme
+               (not (eq (car custom-enabled-themes) theme)))
+      (spacemacs/load-theme theme))))
+
+(when (boundp 'ns-system-appearance-change-functions)
+  (add-hook 'ns-system-appearance-change-functions
+            #'my/sync-theme-with-macos)
+  (my/sync-theme-with-macos ns-system-appearance))
+
 ;; Ensure GUI Emacs can find user-installed executables (macOS often doesn't
 ;; inherit your shell PATH).
 (let ((opencode-bin (expand-file-name "~/.opencode/bin")))

@@ -13,7 +13,8 @@
                  ('dark 'spacemacs-dark)
                  ('light 'spacemacs-light))))
     (when (and theme
-               (not (eq (car custom-enabled-themes) theme)))
+               (not (equal custom-enabled-themes (list theme))))
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
       (spacemacs/load-theme theme))))
 
 (when (boundp 'ns-system-appearance-change-functions)

@@ -1,9 +1,9 @@
 ;;; projectile.el --- Local Projectile behavior and shortcuts -*- lexical-binding: t -*-
 
 (require 'seq)
+(require 'eieio)
 
 (defvar helm-current-buffer nil)
-(defvar helm-source-projectile-projects nil)
 (defvar projectile-known-projects nil)
 
 ;; Keep project file lists for one hour.  The cache is transient, so it is
@@ -109,9 +109,18 @@ Projectile project, fall back to its full path."
 
 (defun my/helm-projectile-install-relevant-project-candidates ()
   "Make Helm honor Projectile's current-project filtering."
-  (when helm-source-projectile-projects
-    (setcdr (assq 'candidates helm-source-projectile-projects)
-            #'my/helm-projectile-switch-project-candidates)))
+  (let ((source (and (boundp 'helm-source-projectile-projects)
+                     (symbol-value 'helm-source-projectile-projects))))
+    (cond
+     ((eieio-object-p source)
+      (when (slot-exists-p source 'candidates)
+        (setf (slot-value source 'candidates)
+              #'my/helm-projectile-switch-project-candidates)))
+     ((listp source)
+      (let ((candidates (assq 'candidates source)))
+        (when candidates
+          (setcdr candidates
+                  #'my/helm-projectile-switch-project-candidates)))))))
 
 (with-eval-after-load 'helm-projectile
   (my/helm-projectile-install-relevant-project-candidates))

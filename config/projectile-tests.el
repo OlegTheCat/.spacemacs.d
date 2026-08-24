@@ -2,6 +2,25 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'eieio)
+
+(defclass projectile-config-test-helm-source ()
+  ((candidates :initarg :candidates))
+  "Minimal Helm-like source used to test EIEIO compatibility.")
+
+(defmacro projectile-config-with-helm-source (source &rest body)
+  "Evaluate BODY with Helm's project SOURCE globally bound to SOURCE."
+  (declare (indent 1) (debug t))
+  `(let ((was-bound (boundp 'helm-source-projectile-projects))
+         (old-source (and (boundp 'helm-source-projectile-projects)
+                          (symbol-value 'helm-source-projectile-projects))))
+     (unwind-protect
+         (progn
+           (set 'helm-source-projectile-projects ,source)
+           ,@body)
+       (if was-bound
+           (set 'helm-source-projectile-projects old-source)
+         (makunbound 'helm-source-projectile-projects)))))
 
 (ert-deftest projectile-config-settings-use-one-hour-transient-cache ()
   (should (eq projectile-enable-caching t))
@@ -252,9 +271,20 @@
       (kill-buffer project-buffer))))
 
 (ert-deftest projectile-config-installs-relevant-helm-candidates ()
-  (let ((helm-source-projectile-projects '((candidates . ignore))))
-    (my/helm-projectile-install-relevant-project-candidates)
-    (should (eq (alist-get 'candidates helm-source-projectile-projects)
-                #'my/helm-projectile-switch-project-candidates))))
+  (let ((source '((candidates . ignore))))
+    (projectile-config-with-helm-source source
+      (my/helm-projectile-install-relevant-project-candidates)
+      (should (eq (alist-get 'candidates source)
+                  #'my/helm-projectile-switch-project-candidates)))))
+
+(ert-deftest projectile-config-installs-relevant-eieio-helm-candidates ()
+  (let ((source (projectile-config-test-helm-source :candidates #'ignore)))
+    (projectile-config-with-helm-source source
+      (my/helm-projectile-install-relevant-project-candidates)
+      (should (eq (slot-value source 'candidates)
+                  #'my/helm-projectile-switch-project-candidates)))))
+
+(ert-deftest projectile-config-does-not-prebind-helm-projectile-source ()
+  (should-not (boundp 'helm-source-projectile-projects)))
 
 ;;; projectile-tests.el ends here

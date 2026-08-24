@@ -1681,9 +1681,19 @@ erroring on a sole window."
         (should (= (length (ghostel-toggle--sessions-for-root 'terminal root))
                    1))))))
 
-(ert-deftest gtt-win-toggle-visible-hides-even-unfocused ()
-  "Unlike the agent 5-state toggle, s-i hides the drawer whenever it shows
-this project — no focus dance."
+(ert-deftest gtt-win-toggle-focused-hides ()
+  "A focused terminal drawer hides on s-i."
+  (gt-with-env
+    (let ((root "/tmp/projA/"))
+      (gtt--register root)
+      (gt--show-code root)
+      (ghostel-terminal-toggle)                     ; show drawer (focused)
+      (ghostel-terminal-toggle)                     ; focused → hide
+      (should-not (ghostel-toggle--panel-window 'terminal))
+      (should (= (gt--win-count) 1)))))
+
+(ert-deftest gtt-win-toggle-unfocused-focuses-not-hides ()
+  "A visible but unfocused terminal drawer receives focus on s-i."
   (gt-with-env
     (let ((root "/tmp/projA/")
           (code-win (selected-window)))
@@ -1691,9 +1701,10 @@ this project — no focus dance."
       (gt--show-code root)
       (ghostel-terminal-toggle)                     ; show drawer (focused)
       (select-window code-win)                      ; focus the code window
-      (ghostel-terminal-toggle)                     ; visible → hide, even unfocused
-      (should-not (ghostel-toggle--panel-window 'terminal))
-      (should (= (gt--win-count) 1)))))
+      (let ((n (gt--win-count)))
+        (ghostel-terminal-toggle)                   ; unfocused → focus drawer
+        (should (ghostel-toggle--panel-window-p (selected-window) 'terminal))
+        (should (= (gt--win-count) n))))))
 
 (ert-deftest gtt-win-toggle-prefix-creates-new ()
   "C-u s-i creates a new terminal tab."

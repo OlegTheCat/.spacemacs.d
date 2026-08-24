@@ -66,8 +66,8 @@ re-expand it to fullscreen when hidden or split.  Fullscreen mode is
 sticky until `s-<return>' demotes it (see
 `ghostel-toggle-fullscreen-command'); the `C-s-i' home fullscreen is
 dismissed outright.  Otherwise: hide the drawer when it shows this
-project (even unfocused), else show the default session, creating one
-when none exists."
+project and is focused; when it is visible but unfocused, focus it instead.
+If it is hidden, show the default session, creating one when none exists."
   (interactive)
   (let* ((root (ghostel-toggle-command-root))
          (view (and (not current-prefix-arg)
@@ -78,7 +78,11 @@ when none exists."
      (view
       (ghostel-toggle--fullscreen-flip view))
      ((ghostel-toggle--root-visible-p 'terminal root)
-      (ghostel-toggle-hide-panel 'terminal))
+      (let ((win (ghostel-toggle--panel-window 'terminal)))
+        (if (eq (selected-window) win)
+            (ghostel-toggle-hide-panel 'terminal)
+          (ghostel-toggle--remember-last-window 'terminal)
+          (select-window win))))
      (t
       (let ((session (ghostel-toggle--default-session 'terminal root)))
         (ghostel-toggle--remember-last-window 'terminal)

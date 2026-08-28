@@ -7,6 +7,16 @@ bare symbol.  Restore spinner.el's sequence-form mode-line shape."
   (when (eq mode-line-process 'spinner--mode-line-construct)
     (setq mode-line-process '("" spinner--mode-line-construct))))
 
+(defun my/ghostel-readonly-cancel-selection-or-exit ()
+  "Cancel an active selection, or exit Ghostel's read-only mode.
+When there is no active selection, preserve Ghostel's normal fast-exit
+behavior."
+  (interactive)
+  (setq quit-flag nil)
+  (if (use-region-p)
+      (deactivate-mark)
+    (ghostel-readonly-exit)))
+
 (with-eval-after-load 'ghostel
   (require 'flash)
 
@@ -73,6 +83,10 @@ Uses raw UTF-8 bytes because ghostel--filter receives unibyte strings."
         (message "Copied to kill ring"))))
   (define-key ghostel-readonly-mode-map (kbd "M-w") #'ghostel-copy-mode-copy-stay)
   (define-key ghostel-readonly-mode-map (kbd "C-w") #'ghostel-copy-mode-copy-stay)
+
+  ;; Let the first C-g dismiss an active selection without leaving copy mode.
+  (define-key ghostel-readonly-fast-exit-mode-map (kbd "C-g")
+              #'my/ghostel-readonly-cancel-selection-or-exit)
 
   (add-to-list 'golden-ratio-exclude-modes "ghostel-mode"))
 

@@ -994,6 +994,116 @@ sees no shown view in a split and falls to the bring-on-top branch)."
   (should-error (ghostel-agent--command-program ""))
   (should-error (ghostel-agent--command-program nil)))
 
+(ert-deftest gta-fork-command-builders ()
+  (let ((id "12345678-1234-4567-89ab-123456789abc"))
+    (should (equal (ghostel-agent--fork-command "claude --model opus" id)
+                   (format "claude --resume %s --fork-session" id)))
+    (should (equal (ghostel-agent--fork-command "codex --search" id)
+                   (format "codex fork %s" id)))
+    (should (equal (ghostel-agent--fork-command "pi --model x" id)
+                   (format "pi --fork %s" id)))
+    (should (equal
+             (ghostel-agent--fork-command "'/tmp/My Agent/pi' --flag" id)
+             (format "%s --fork %s"
+                     (shell-quote-argument "/tmp/My Agent/pi") id)))))
+
+(ert-deftest gta-fork-command-builders-are-configurable ()
+  (let ((ghostel-agent-fork-command-builders
+         '(("custom" . (lambda (_command id)
+                         (format "custom branch %s" id))))))
+    (should (equal
+             (ghostel-agent--fork-command
+              "custom --ordinary-start-flag"
+              "12345678-1234-4567-89ab-123456789abc")
+             "custom branch 12345678-1234-4567-89ab-123456789abc"))))
+
+(ert-deftest gta-fork-command-rejects-unsupported-agent-before-arming ()
+  (gt-with-env
+    (let ((session (gta--register 'unsupported "/tmp/projA/")))
+      (switch-to-buffer (plist-get session :buffer))
+      (should-error (ghostel-agent-fork-current-session))
+      (should-not ghostel-agent--fork-pending))))
+
+(ert-deftest gta-copied-session-id-requires-exactly-one-uuid ()
+  (let ((id "12345678-1234-4567-89AB-123456789ABC"))
+    (should (equal (ghostel-agent--copied-session-id id) (downcase id)))
+    (should (equal (ghostel-agent--copied-session-id
+                    (format "Session ID: %s" id))
+                   (downcase id)))
+    (should-error (ghostel-agent--copied-session-id nil))
+    (should-error (ghostel-agent--copied-session-id "not a UUID"))
+    (should-error
+     (ghostel-agent--copied-session-id (format "%s and %s" id id)))))
+
+(ert-deftest gta-fork-command-arms-then-consumes-id-after-success ()
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (parent (gta--register 'codex root))
+           (parent-buffer (plist-get parent :buffer))
+           (id "12345678-1234-4567-89ab-123456789abc")
+           (kill-ring (list id "older copied text"))
+           (kill-ring-yank-pointer kill-ring))
+      (switch-to-buffer parent-buffer)
+      (ghostel-agent-fork-current-session)
+      (should ghostel-agent--fork-pending)
+      (should (= (length (ghostel-toggle--sessions-for-root 'agent root)) 1))
+      (should (equal (car kill-ring) id))
+
+      ;; Real Ghostel creation can change `current-buffer' before returning.
+      ;; Reproduce that here so the armed source must be reset explicitly.
+      (let ((real-create (symbol-function 'ghostel-agent--create)))
+        (cl-letf (((symbol-function 'ghostel-agent--create)
+                   (lambda (&rest args)
+                     (let ((win (apply real-create args)))
+                       (set-buffer (window-buffer win))
+                       win))))
+          (ghostel-agent-fork-current-session)))
+      (let* ((sessions (ghostel-toggle--sessions-for-root 'agent root))
+             (child (ghostel-toggle--selected-session 'agent root)))
+        (should (= (length sessions) 2))
+        (should (buffer-live-p parent-buffer))
+        (with-current-buffer parent-buffer
+          (should-not ghostel-agent--fork-pending))
+        (with-current-buffer (plist-get child :buffer)
+          (should-not ghostel-agent--fork-pending))
+        (should (equal (plist-get child :command)
+                       (format "codex fork %s" id)))
+        (should (equal (plist-get child :label) "⑂ Codex"))
+        (should (equal (plist-get child :harness) "codex"))
+        (should (equal (plist-get child :forked-from) id))
+        (should (equal (plist-get child :root)
+                       (ghostel-toggle--normalize-root root)))
+        (should (eq (current-buffer) (plist-get child :buffer)))
+        (should (equal kill-ring '("older copied text")))
+        (should (eq kill-ring-yank-pointer kill-ring))))))
+
+(ert-deftest gta-fork-command-keeps-id-and-pending-state-after-failure ()
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (parent (gta--register 'codex root))
+           (id "12345678-1234-4567-89ab-123456789abc")
+           (kill-ring (list id)))
+      (switch-to-buffer (plist-get parent :buffer))
+      (ghostel-agent-fork-current-session)
+      (cl-letf (((symbol-function 'ghostel-agent--create)
+                 (lambda (&rest _) (error "spawn failed"))))
+        (should-error (ghostel-agent-fork-current-session)))
+      (should ghostel-agent--fork-pending)
+      (should (equal kill-ring (list id))))))
+
+(ert-deftest gta-fork-command-pending-state-is-buffer-local ()
+  (gt-with-env
+    (let* ((root "/tmp/projA/")
+           (first (gta--register 'claude root))
+           (second (gta--register 'codex root)))
+      (switch-to-buffer (plist-get first :buffer))
+      (ghostel-agent-fork-current-session)
+      (should ghostel-agent--fork-pending)
+      (switch-to-buffer (plist-get second :buffer))
+      (should-not ghostel-agent--fork-pending)
+      (ghostel-agent-fork-current-session)
+      (should ghostel-agent--fork-pending))))
+
 ;;; --- session registry & labels ------------------------------------------------
 
 (ert-deftest gta-labels-increment-per-command-name ()
@@ -1647,7 +1757,9 @@ erroring on a sole window."
   (should-not (lookup-key ghostel-terminal-session-mode-map (kbd "`"))))
 
 (ert-deftest gta-session-mode-map-bindings ()
-  "The agent session keymap wires s-c and s-'; s-t stays global (prefix-aware)."
+  "The agent map wires local helpers; s-t stays global (prefix-aware)."
+  (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-b"))
+              'ghostel-agent-fork-current-session))
   (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-c"))
               'ghostel-agent-copy-clean))
   (should (eq (lookup-key ghostel-agent-session-mode-map (kbd "s-'"))

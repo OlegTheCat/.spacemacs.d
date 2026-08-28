@@ -27,6 +27,14 @@
 (defvar ghostel-agent-command-delay 0.3
   "Seconds to wait before sending the agent command to a new shell.")
 
+(defvar ghostel-agent-fork-command-builders
+  '(("claude" . ghostel-agent--claude-fork-command)
+    ("codex" . ghostel-agent--codex-fork-command)
+    ("pi" . ghostel-agent--pi-fork-command))
+  "Alist mapping agent executable names to fork-command builders.
+Each builder receives the source session's complete command and the copied
+parent session ID, and returns the complete command for the forked session.")
+
 (defvar ghostel-agent-session-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "s-<left>") #'ghostel-agent-previous-session)
@@ -41,6 +49,11 @@
   :init-value nil
   :lighter nil
   :keymap ghostel-agent-session-mode-map)
+
+;; Keep additions effective when this file is reloaded into a running Emacs:
+;; the initializer of the `defvar' above only runs on the first load.
+(define-key ghostel-agent-session-mode-map (kbd "s-b")
+            #'ghostel-agent-fork-current-session)
 
 ;;; Optional paired backticks
 ;;;
@@ -172,15 +185,20 @@ executing the command."
       (ghostel-send-string command)
       (ghostel-send-key "return"))))
 
-(defun ghostel-agent--create (command root &optional hidden)
+(defun ghostel-agent--create (command root &optional hidden extra label)
   "Create a new ghostel terminal running COMMAND in ROOT and return its window.
-When HIDDEN is non-nil, create without touching the current window layout."
+When HIDDEN is non-nil, create without touching the current window layout.
+EXTRA is additional metadata stored on the managed session.  LABEL, when
+non-nil, overrides the ordinary incrementing agent label."
   (let* ((program (file-name-nondirectory
                    (ghostel-agent--command-program command)))
          (base-label (capitalize program))
          (args (list :name program
-                     :label (ghostel-agent--next-label base-label root)
-                     :extra (list :agent-label base-label :command command)
+                     :label (or label
+                                (ghostel-agent--next-label base-label root))
+                     :extra (append (list :agent-label base-label
+                                          :command command)
+                                    extra)
                      :setup (lambda (buf)
                               (run-at-time ghostel-agent-command-delay nil
                                            #'ghostel-agent--send-command
@@ -188,6 +206,118 @@ When HIDDEN is non-nil, create without touching the current window layout."
     (if hidden
         (apply #'ghostel-toggle--create-session-hidden 'agent root args)
       (apply #'ghostel-toggle-create-session 'agent root args))))
+
+;;; Session forking (s-b)
+
+(defconst ghostel-agent--session-id-re
+  "\\b[[:xdigit:]]\\{8\\}-[[:xdigit:]]\\{4\\}-[[:xdigit:]]\\{4\\}-[[:xdigit:]]\\{4\\}-[[:xdigit:]]\\{12\\}\\b"
+  "Regexp matching the UUID session IDs used by supported agent harnesses.")
+
+(defvar-local ghostel-agent--fork-pending nil
+  "Non-nil after this agent buffer has armed a manual session fork.")
+
+(defun ghostel-agent--copied-session-id (text)
+  "Return the sole session UUID found in TEXT, or signal a user error."
+  (unless (stringp text)
+    (user-error "Copy the current agent session ID, then run the fork command again"))
+  (let ((case-fold-search t)
+        (start 0)
+        ids)
+    (while (string-match ghostel-agent--session-id-re text start)
+      (push (downcase (match-string 0 text)) ids)
+      (setq start (match-end 0)))
+    (cond
+     ((null ids)
+      (user-error "The newest kill-ring item contains no session UUID"))
+     ((cdr ids)
+      (user-error "The newest kill-ring item contains multiple session UUIDs"))
+     (t (car ids)))))
+
+(defun ghostel-agent--fork-program (command)
+  "Return the executable basename identifying agent COMMAND."
+  (file-name-nondirectory (ghostel-agent--command-program command)))
+
+(defun ghostel-agent--quoted-program (command)
+  "Return COMMAND's executable token quoted for reuse in a shell command."
+  (shell-quote-argument (ghostel-agent--command-program command)))
+
+(defun ghostel-agent--claude-fork-command (command session-id)
+  "Build a Claude fork COMMAND for parent SESSION-ID."
+  (format "%s --resume %s --fork-session"
+          (ghostel-agent--quoted-program command)
+          (shell-quote-argument session-id)))
+
+(defun ghostel-agent--codex-fork-command (command session-id)
+  "Build a Codex fork COMMAND for parent SESSION-ID."
+  (format "%s fork %s"
+          (ghostel-agent--quoted-program command)
+          (shell-quote-argument session-id)))
+
+(defun ghostel-agent--pi-fork-command (command session-id)
+  "Build a Pi fork COMMAND for parent SESSION-ID."
+  (format "%s --fork %s"
+          (ghostel-agent--quoted-program command)
+          (shell-quote-argument session-id)))
+
+(defun ghostel-agent--fork-command-builder (command)
+  "Return the configured fork-command builder for agent COMMAND."
+  (let* ((program (ghostel-agent--fork-program command))
+         (builder (cdr (assoc-string program
+                                     ghostel-agent-fork-command-builders t))))
+    (unless builder
+      (user-error "No Ghostel fork adapter is configured for %s" program))
+    builder))
+
+(defun ghostel-agent--fork-command (command session-id)
+  "Build the fork command for agent COMMAND and parent SESSION-ID."
+  (funcall (ghostel-agent--fork-command-builder command) command session-id))
+
+(defun ghostel-agent--consume-kill-ring-head (text)
+  "Remove TEXT from the head of the kill ring if it is still current."
+  (when (and kill-ring (equal (car kill-ring) text))
+    (setq kill-ring (cdr kill-ring)
+          kill-ring-yank-pointer kill-ring)))
+
+(defun ghostel-agent-fork-current-session ()
+  "Fork the current managed agent session into a new Ghostel tab.
+
+The first invocation arms the current buffer and asks the user to copy the
+harness's current session UUID.  The second invocation reads exactly one UUID
+from the newest kill-ring item, creates the harness-specific fork in the same
+project, and consumes that kill-ring item only after successful creation."
+  (interactive)
+  (let ((session (ghostel-toggle--current-session 'agent))
+        (source-buffer (current-buffer)))
+    (unless session
+      (user-error "This is not a managed Ghostel agent session"))
+    (if (not ghostel-agent--fork-pending)
+        (progn
+          (ghostel-agent--fork-command-builder (plist-get session :command))
+          (setq ghostel-agent--fork-pending t)
+          (message "Copy the current %s session ID, then press s-b again to fork"
+                   (capitalize
+                    (ghostel-agent--fork-program
+                     (plist-get session :command)))))
+      (let* ((copied (car-safe kill-ring))
+             (parent-id (ghostel-agent--copied-session-id copied))
+             (source-command (plist-get session :command))
+             (program (ghostel-agent--fork-program source-command))
+             (fork-command (ghostel-agent--fork-command source-command parent-id))
+             (root (plist-get session :root))
+             (fork-label (format "⑂ %s" (plist-get session :label)))
+             (win (ghostel-agent--create
+                   fork-command root nil
+                   (list :harness program :forked-from parent-id)
+                   fork-label)))
+        ;; Session creation may select/change to the new Ghostel buffer before
+        ;; returning.  Reset the buffer that was armed, not whichever buffer
+        ;; happens to be current after creation.
+        (when (buffer-live-p source-buffer)
+          (with-current-buffer source-buffer
+            (setq ghostel-agent--fork-pending nil)))
+        (ghostel-agent--consume-kill-ring-head copied)
+        (select-window win)
+        (message "Forked %s session %s" (capitalize program) parent-id)))))
 
 (defun ghostel-agent--send-region (buf)
   "Send the active region with file context to the ghostel agent BUF.

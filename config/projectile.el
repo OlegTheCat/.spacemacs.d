@@ -63,19 +63,38 @@ Projectile project, fall back to its full path."
          (and buffer-file-name
               (not (derived-mode-p 'special-mode))))))
 
+(defun my/projectile--fullscreen-agent-view (root)
+  "Return ROOT's project agent fullscreen view, or nil.
+Dismissable views are the special home agents created by `C-s-l' and must not
+be used as project-switch landing targets."
+  (when (fboundp 'ghostel-toggle--view-for-root)
+    (let ((view (ghostel-toggle--view-for-root 'agent root)))
+      (and view
+           (not (plist-get view :dismiss))
+           (buffer-live-p (plist-get view :buffer))
+           view))))
+
 (defun my/projectile-switch-to-last-buffer-or-file ()
-  "Switch to the project's most recent text buffer or useful landing file."
-  (let ((buffer
-         (seq-find #'my/projectile--text-buffer-p
-                   (projectile-project-buffers-non-visible))))
-    (if buffer
-        (switch-to-buffer buffer nil t)
-      (let* ((root (projectile-acquire-root))
-             (file (my/projectile--start-file root)))
+  "Switch to the project's fullscreen agent, text buffer, or landing file.
+An existing project agent in sticky fullscreen mode takes precedence.  The
+dismissable home agent created by `C-s-l' is never selected here."
+  (let* ((root (projectile-acquire-root))
+         (agent-view (my/projectile--fullscreen-agent-view root))
+         (buffer
+          (unless agent-view
+            (seq-find #'my/projectile--text-buffer-p
+                      (projectile-project-buffers-non-visible)))))
+    (cond
+     (agent-view
+      (ghostel-toggle--show-fullscreen agent-view))
+     (buffer
+      (switch-to-buffer buffer nil t))
+     (t
+      (let ((file (my/projectile--start-file root)))
         (if file
             (find-file (expand-file-name file root))
           (user-error "Project %s has no files"
-                      (abbreviate-file-name root)))))))
+                      (abbreviate-file-name root))))))))
 
 (setq projectile-switch-project-action
       #'my/projectile-switch-to-last-buffer-or-file)
